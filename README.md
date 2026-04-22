@@ -1,3 +1,9 @@
+To initialize db run 
+```bash 
+./scripts/init_db.sh 
+```
+
+
 We are following test-driven-development strictly. 
 Tasks:
 - [ ]  Write a unit test for a healthcheck endpoint
