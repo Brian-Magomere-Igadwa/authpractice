@@ -5,7 +5,6 @@ use authpractice::{
     startup::run,
     telemetry::{get_subscriber, init_subscriber},
 };
-use secrecy::ExposeSecret;
 use sqlx::postgres::PgPoolOptions;
 
 #[tokio::main]
