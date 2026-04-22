@@ -1,28 +1,31 @@
-use actix_web::{App, HttpResponse, HttpServer, Responder, get, post, web};
+use std::net::TcpListener;
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
+use authpractice::{
+    configuration::get_configuration,
+    startup::run,
+    telemetry::{get_subscriber, init_subscriber},
+};
+use secrecy::ExposeSecret;
+use sqlx::postgres::PgPoolOptions;
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
-}
-
-async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
-}
-
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| {
-        App::new()
-            .service(hello)
-            .service(echo)
-            .route("/fuk", web::get().to(manual_hello))
-    })
-    .bind(("127.0.0.1", 8080))?
-    .run()
-    .await
+    //telemetry setup
+    let subscriber = get_subscriber("authpractice".into(), "info".into(), std::io::stdout);
+    init_subscriber(subscriber);
+
+    // Bubble up the io::Error if we failed to bind the address
+    let configuration = get_configuration().expect("Failed to read configuration.");
+    let connection_pool = PgPoolOptions::new()
+        .acquire_timeout(std::time::Duration::from_secs(2))
+        .connect_lazy_with(configuration.database.with_db());
+
+    let address = format!(
+        "{}:{}",
+        configuration.application.host, configuration.application.port
+    );
+    let listener = TcpListener::bind(address)?;
+
+    run(listener, connection_pool)?.await?;
+    Ok(())
 }
