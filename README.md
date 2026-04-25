@@ -17,3 +17,5 @@ Tasks:
 - [ ]  Dockerize the application and have the database run as a docker container too.
 - [ ]  Persist the user in a relational database(postgress), just name, password, date-of-birth, country.
 - [ ]  Do stress testing to the application, take note of bottlenecks e.g does too many people(could be single person sending multiple signup or sign in requests) signing up at once conducting sign ins, does that cause the server to be out of service? if that's the case fix that.
+
+Email verification is beyond the scope of this task.
