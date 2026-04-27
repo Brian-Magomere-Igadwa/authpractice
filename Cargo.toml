@@ -24,7 +24,7 @@ reqwest = { version = "0.13.1", default-features = false, features = [
     "rustls",
 ] }
 chrono = "0.4.43"
-validator = { version = "0.19", features = ["derive", "email"] }
+# validator = { version = "0.19", features = ["derive", "email"] }
 claim = "0.5.0"
 unicode-segmentation = "1.12.0"
 
