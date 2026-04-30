@@ -1,20 +1,25 @@
-use validator::validate_email;
+use validator::Validate;
 
-#[derive(Debug)]
-pub struct UserEmail(String);
+use serde::Deserialize;
+
+#[derive(Debug, Validate, Deserialize)]
+pub struct UserEmail {
+    #[validate(email)]
+    mail: String,
+}
 
 impl UserEmail {
     pub fn parse(s: String) -> Result<UserEmail, String> {
-        if ValidateEmail(&s) {
-            Ok(Self(s))
-        } else {
-            Err(format!("{} is not a valid subscriber email.", s))
+        let user_mail = UserEmail { mail: s.clone() };
+        match user_mail.validate() {
+            Ok(_) => Ok(user_mail),
+            Err(_) => Err(format!("{} is not a valid subscriber email.", &s)),
         }
     }
 }
 impl AsRef<str> for UserEmail {
     fn as_ref(&self) -> &str {
-        &self.0
+        &self.mail
     }
 }
 
