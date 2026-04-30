@@ -1,15 +1,10 @@
-use std::net::TcpListener;
-// This Executor is apparently required for PgConnection.execute to work
-// Still magic to me
-use authpractice::{
-    configuration::{DatabaseSettings, get_configuration},
-    startup::run,
-    telemetry::{get_subscriber, init_subscriber},
-};
+use authpractice::configuration::{DatabaseSettings, get_configuration};
+use authpractice::startup::run;
+use authpractice::telemetry::{get_subscriber, init_subscriber};
 use once_cell::sync::Lazy;
 use secrecy::ExposeSecret;
-use sqlx::Executor;
-use sqlx::{Connection, PgConnection, PgPool};
+use sqlx::{Connection, Executor, PgConnection, PgPool};
+use std::net::TcpListener;
 use uuid::Uuid;
 
 // Ensure that the `tracing` stack is only initialised once using `once_cell`
@@ -25,30 +20,12 @@ static TRACING: Lazy<()> = Lazy::new(|| {
     };
 });
 
-#[tokio::test]
-async fn health_check_works() {
-    //Arrange
-    let address = spawn_app().await;
-    let client = reqwest::Client::new();
-
-    // Act
-    let response = client
-        .get(&format!("{}/health_check", &address.address))
-        .send()
-        .await
-        .expect("Failed to execute request.");
-
-    // Assert
-    assert!(response.status().is_success());
-    assert_eq!(Some(0), response.content_length());
-}
-
 pub struct TestApp {
     pub address: String,
     pub db_pool: PgPool,
 }
 
-async fn spawn_app() -> TestApp {
+pub async fn spawn_app() -> TestApp {
     Lazy::force(&TRACING);
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
@@ -69,7 +46,7 @@ async fn spawn_app() -> TestApp {
     }
 }
 
-pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
+async fn configure_database(config: &DatabaseSettings) -> PgPool {
     // Create database
     let mut connection = PgConnection::connect_with(&config.without_db())
         .await
