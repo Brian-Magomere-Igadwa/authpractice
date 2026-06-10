@@ -1,14 +1,14 @@
----
 # Secure Authentication & Session Lifecycle Backend
 
-Welcome to the core authentication engine. This project is a robust, production-ready authentication and user management system built with Rust. This backend is engineered from the ground up with defensive design patterns, high-concurrency optimizations, compile-time safety, and comprehensive observability.
+This project is a robust, production-ready authentication and user management system built with Rust. This backend is engineered from the ground up with defensive design patterns, high-concurrency optimizations, compile-time safety, and comprehensive observability.
 
 The system relies on a dual-layer storage strategy—utilizing **Postgres** for persistent user data and **Redis** for fast, reliable session management—while explicitly preparing the codebase to gracefully withstand heavy loads and distributed stress.
+
 ---
 
 ## System Architecture
 
-To understand the internal lifecycles, defensive guardrails, and API transitions of this system before diving into the code, refer to our structural sequence diagram.
+To understand the internal lifecycles, defensive guardrails, and API transitions of this system before diving into the code, refer to our structural sequence diagram below:
 
 ```mermaid
 sequenceDiagram
