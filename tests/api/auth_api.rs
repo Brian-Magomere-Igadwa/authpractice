@@ -78,6 +78,53 @@ async fn cant_signup_with_invalid_user_name() {
         )
     }
 }
+
+#[tokio::test]
+async fn cant_signup_with_invalid_password_one_that_cant_be_parsed() {
+    //Arrange
+    let app = spawn_app().await;
+    let below_agreed_characters = "";
+    let more_than_agreed_characters = &"a".repeat(65);
+    let password_that_exists_in_block_list = "";
+    let valid_user_name = "johndoe";
+
+    let test_cases = vec![
+        (
+            below_agreed_characters,
+            "No password with less than 8(from NIST) characters allowed.",
+        ),
+        (
+            more_than_agreed_characters,
+            "No password with more than 64(from NIST) characters allowed.",
+        ),
+        (
+            password_that_exists_in_block_list,
+            "No password that exists in block list is allowed.",
+        ),
+    ];
+
+    for (invalid_pass, error_message) in test_cases {
+        //Act
+        let response = reqwest::Client::new()
+            .post(format!("{}/auth", &app.address))
+            .json(&serde_json::json!(
+                {
+                    "name":&valid_user_name,
+                    "password":&invalid_pass,
+                }
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.");
+        //Assert
+        assert_eq!(
+            reqwest::StatusCode::BAD_REQUEST,
+            response.status().as_u16(),
+            "{}",
+            error_message
+        )
+    }
+}
 //signin
 //delete
 //patch
