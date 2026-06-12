@@ -27,6 +27,10 @@ chrono = "0.4.43"
 validator = { version = "0.16", features = ["derive"] }
 claim = "0.5.0"
 unicode-segmentation = "1.12.0"
+base64 = "0.13"
+argon2 = { version = "0.5.3", features = ["std"] }
+thiserror = "2.0.18"
+anyhow = "1.0.102"
 
 [dependencies.sqlx]
 version = "0.8.6"

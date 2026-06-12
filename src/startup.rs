@@ -5,7 +5,7 @@ use actix_web::{App, HttpServer, dev::Server, web};
 use sqlx::PgPool;
 use tracing_actix_web::TracingLogger;
 
-use crate::routes::health_check;
+use crate::routes::{create_user_account, health_check};
 
 pub fn run(listener: TcpListener, db_pool: PgPool) -> Result<Server, std::io::Error> {
     // Wrap the pool using web::Data, which boils down to an Arc smart pointer
@@ -14,6 +14,7 @@ pub fn run(listener: TcpListener, db_pool: PgPool) -> Result<Server, std::io::Er
         App::new()
             .wrap(TracingLogger::default())
             .route("/health_check", web::get().to(health_check))
+            .route("/auth", web::post().to(create_user_account))
             // Register the connection as part of the application state
             // Get a pointer copy and attach it to the application state
             .app_data(connection.clone())

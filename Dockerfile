@@ -1,9 +1,6 @@
 # Build stage
 # We use the latest Rust stable release as base image
 FROM lukemathwalker/cargo-chef:latest-rust-1.93.0-slim AS chef
-# Let's switch our working directory to `app` (equivalent to `cd app`)
-# The `app` folder will be created for us by Docker in case it does not
-# exist already.
 WORKDIR /app
 # Install the required system dependencies for our linking configuration
 RUN apt update && apt install -y \

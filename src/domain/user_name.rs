@@ -4,13 +4,6 @@ use unicode_segmentation::UnicodeSegmentation;
 pub struct UserName(String);
 
 impl UserName {
-    pub fn inner_ref(&self) -> &str {
-        &self.0
-    }
-
-    /// Returns an instance of `UserName` if the input satisfies all
-    /// our validation constraints on user names.
-    /// It panics otherwise.
     pub fn parse(s: String) -> Result<UserName, String> {
         let is_empty_or_whitespace = s.trim().is_empty();
         let is_too_long = s.graphemes(true).count() > 256;
