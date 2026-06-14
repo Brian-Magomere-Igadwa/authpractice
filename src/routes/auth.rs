@@ -14,15 +14,18 @@ pub struct FormData {
     password: String,
 }
 
-impl TryFrom<FormData> for User {
-    type Error = String;
-
-    fn try_from(value: FormData) -> Result<Self, Self::Error> {
+impl User {
+    /// Custom async constructor to bypass TryFrom's synchronous limitation
+    pub async fn try_from_form(value: FormData) -> Result<Self, String> {
         let name = UserName::parse(value.name)?;
-        let password = UserPassword::parse(value.password)?;
+
+        // Now you can cleanly .await your async password parser!
+        let password = UserPassword::parse(value.password).await?;
+
         Ok(Self { name, password })
     }
 }
+
 #[derive(thiserror::Error)]
 pub enum SignUpError {
     #[error("{0}")]
@@ -63,14 +66,21 @@ pub fn error_chain_fmt(
     name = "Adding a new user",
     skip(form, pool),
     fields(
-        user_name= %form.name,
+        user_name = %form.name,
     )
 )]
 pub async fn create_user_account(
     form: web::Json<FormData>,
     pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, SignUpError> {
-    let new_user = form.0.try_into().map_err(SignUpError::ValidationError)?;
+    let form_data = form.into_inner();
+
+    // 2. Call the associated async function on User and explicitly .await it
+    let new_user = User::try_from_form(form_data)
+        .await
+        .map_err(SignUpError::ValidationError)?;
+
+    // 3. Insert the newly verified domain model into your DB
     match insert_user(&pool, &new_user).await {
         Ok(_) => Ok(HttpResponse::Created().finish()),
         Err(e) => Err(SignUpError::UnexpectedError(e.into())),
