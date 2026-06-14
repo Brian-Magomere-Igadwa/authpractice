@@ -85,7 +85,7 @@ async fn cant_signup_with_invalid_password_one_that_cant_be_parsed() {
     let app = spawn_app().await;
     let below_agreed_characters = "";
     let more_than_agreed_characters = &"a".repeat(65);
-    let password_that_exists_in_block_list = "";
+    let password_that_exists_in_block_list = "password123";
     let valid_user_name = "johndoe";
 
     let test_cases = vec![
