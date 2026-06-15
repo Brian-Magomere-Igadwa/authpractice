@@ -1,4 +1,5 @@
 use authpractice::configuration::{DatabaseSettings, get_configuration};
+use authpractice::end_points::{HEALTH_CHECK, USERS};
 use authpractice::startup::run;
 use authpractice::telemetry::{get_subscriber, init_subscriber};
 use once_cell::sync::Lazy;
@@ -23,6 +24,29 @@ static TRACING: Lazy<()> = Lazy::new(|| {
 pub struct TestApp {
     pub address: String,
     pub db_pool: PgPool,
+    pub api_client: reqwest::Client,
+}
+
+impl TestApp {
+    pub async fn post_signup<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(&format!("{}{}", &self.address, USERS))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn health_check(&self) -> reqwest::Response {
+        self.api_client
+            .get(&format!("{}{}", &self.address, HEALTH_CHECK))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
 }
 
 pub async fn spawn_app() -> TestApp {
@@ -40,9 +64,17 @@ pub async fn spawn_app() -> TestApp {
 
     // We return the application address to the caller!
     let address = format!("http://127.0.0.1:{}", port);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .cookie_store(true)
+        .build()
+        .unwrap();
+
     TestApp {
         address,
         db_pool: connection_pool,
+        api_client: client,
     }
 }
 

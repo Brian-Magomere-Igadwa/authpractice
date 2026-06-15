@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use authpractice::end_points::AUTH;
 use fake::{Fake, Faker};
+use sha1::digest::array::AsArrayMut;
 
 use crate::helpers::spawn_app;
 
@@ -9,14 +11,10 @@ async fn mis_shaped_auth_requests_are_rejected() {
     // Arrange
     let app = spawn_app().await;
     let nonsensical_mis_shaped_payload: HashMap<String, String> = Faker.fake();
+    let signup_body = serde_json::json!(nonsensical_mis_shaped_payload);
 
     //Act
-    let response = reqwest::Client::new()
-        .post(&format!("{}/auth", &app.address))
-        .json(&serde_json::json!(nonsensical_mis_shaped_payload))
-        .send()
-        .await
-        .expect("Failed to execute request.");
+    let response = app.post_signup(&signup_body).await;
 
     // Assert
     assert_eq!(reqwest::StatusCode::BAD_REQUEST, response.status().as_u16());
@@ -56,18 +54,14 @@ async fn cant_signup_with_invalid_user_name() {
     ];
 
     for (invalid_name, error_message) in test_cases {
+        let signup_body = serde_json::json!(
+            {
+                "name":&invalid_name,
+                "password":valid_pass
+            }
+        );
         //Act
-        let response = reqwest::Client::new()
-            .post(format!("{}/auth", &app.address))
-            .json(&serde_json::json!(
-                {
-                    "name":&invalid_name,
-                    "password":valid_pass
-                }
-            ))
-            .send()
-            .await
-            .expect("Failed to execute request.");
+        let response = app.post_signup(&signup_body).await;
 
         //Assert
         assert_eq!(
@@ -104,18 +98,14 @@ async fn cant_signup_with_invalid_password_one_that_cant_be_parsed() {
     ];
 
     for (invalid_pass, error_message) in test_cases {
+        let signup_body = serde_json::json!(
+            {
+                "name":&valid_user_name,
+                "password":&invalid_pass,
+            }
+        );
         //Act
-        let response = reqwest::Client::new()
-            .post(format!("{}/auth", &app.address))
-            .json(&serde_json::json!(
-                {
-                    "name":&valid_user_name,
-                    "password":&invalid_pass,
-                }
-            ))
-            .send()
-            .await
-            .expect("Failed to execute request.");
+        let response = app.post_signup(&signup_body).await;
         //Assert
         assert_eq!(
             reqwest::StatusCode::BAD_REQUEST,
