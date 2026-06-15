@@ -115,6 +115,32 @@ async fn cant_signup_with_invalid_password_one_that_cant_be_parsed() {
         )
     }
 }
+
+//confirm that you can sign up with valid data
+// confirm that the side effects of signing up actually work as expected, that is the user exists in the db post the handler invocation
+#[tokio::test]
+async fn create_user_account_persists_the_new_user() {
+    let name = "random-tom-username";
+    // Arrange
+    let app = spawn_app().await;
+    let signup_body = serde_json::json!({
+        "username": name,
+        "password": "()^%$£**£>?-random-password"
+    });
+
+    // Act
+    app.post_signup(&signup_body).await;
+
+    // Assert
+    let saved = sqlx::query!("SELECT user_name FROM users",)
+        .fetch_one(&app.db_pool)
+        .await
+        .expect("Failed to fetch saved user.");
+
+    assert_eq!(saved.user_name, name);
+}
+
+// confirm fails if there are db errors
 //signin
 //delete
 //patch
