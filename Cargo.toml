@@ -22,6 +22,7 @@ tracing-actix-web = "0.7.21"
 reqwest = { version = "0.13.1", default-features = false, features = [
     "json",
     "rustls",
+    "cookies",
 ] }
 chrono = "0.4.43"
 validator = { version = "0.16", features = ["derive"] }
@@ -32,6 +33,7 @@ argon2 = { version = "0.5.3", features = ["std"] }
 thiserror = "2.0.18"
 anyhow = "1.0.102"
 sha1 = "0.11.0"
+rand = { version = "0.8", features = ["std_rng"] }
 
 [dependencies.sqlx]
 version = "0.8.6"

@@ -4,9 +4,10 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 
 use sqlx::PgPool;
+use uuid::Uuid;
 
 // use validator::validate_email;
-use crate::domain::{User, UserName, UserPassword};
+use crate::domain::{User, UserName, UserPassword, create_credential};
 
 #[derive(serde::Deserialize)]
 pub struct FormData {
@@ -18,8 +19,6 @@ impl User {
     /// Custom async constructor to bypass TryFrom's synchronous limitation
     pub async fn try_from_form(value: FormData) -> Result<Self, String> {
         let name = UserName::parse(value.name)?;
-
-        // Now you can cleanly .await your async password parser!
         let password = UserPassword::parse(value.password).await?;
 
         Ok(Self { name, password })
@@ -81,14 +80,14 @@ pub async fn create_user_account(
         .map_err(SignUpError::ValidationError)?;
 
     // 3. Insert the newly verified domain model into your DB
-    match insert_user(&pool, &new_user).await {
+    match insert_user(&pool, new_user).await {
         Ok(_) => Ok(HttpResponse::Created().finish()),
         Err(e) => Err(SignUpError::UnexpectedError(e.into())),
     }
 }
 
 // Assuming user already created an account
-// We will be getting a user profile by email (unique per schema)
+// We will be getting a user profile by username (unique per schema)
 // #[tracing::instrument(name = "Get user by username", skip(pool))]
 // pub async fn get_user_by_username(pool: &PgPool, user_name: &str) -> Result<User, sqlx::Error> {
 //     let user_found = sqlx::query_as!(
@@ -104,21 +103,12 @@ pub async fn create_user_account(
 // }
 
 #[tracing::instrument(name = "Saving new user details in the database", skip(new_user, pool))]
-pub async fn insert_user(pool: &PgPool, new_user: &User) -> Result<(), sqlx::Error> {
-    //     let _outcome = sqlx::query!(
-    //         r#"
-    // INSERT INTO users (id, email, name, signedup_at)
-    // VALUES ($1, $2, $3, $4)
-    // "#,
-    //         Uuid::new_v4(),
-    //         new_user.email.as_ref(),
-    //         new_user.name.as_ref(),
-    //         Utc::now()
-    //     )
-    //     .execute(pool)
-    //     .await
-    //     .map_err(|e| {
-    //         tracing::error!("Failed to execute query: {:?}", e);
-    //     });
-    Ok(())
+pub async fn insert_user(pool: &PgPool, new_user: User) -> Result<(), anyhow::Error> {
+    create_credential(
+        Uuid::new_v4(),
+        new_user.name,
+        new_user.password.into(),
+        pool,
+    )
+    .await
 }

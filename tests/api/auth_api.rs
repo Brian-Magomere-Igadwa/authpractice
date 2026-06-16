@@ -121,21 +121,29 @@ async fn cant_signup_with_invalid_password_one_that_cant_be_parsed() {
 #[tokio::test]
 async fn create_user_account_persists_the_new_user() {
     let name = "random-tom-username";
+    let pass = "()^%$£**£>?-random-password";
     // Arrange
     let app = spawn_app().await;
     let signup_body = serde_json::json!({
-        "username": name,
-        "password": "()^%$£**£>?-random-password"
+        "name": name,
+        "password": pass
     });
 
     // Act
-    app.post_signup(&signup_body).await;
+    let response = app.post_signup(&signup_body).await;
 
     // Assert
+    assert_eq!(
+        response.status().as_u16(),
+        201,
+        "The API failed to accept the signup request. Response body: {:?}",
+        response.text().await // Prints the server's error message if it fails
+    );
+
     let saved = sqlx::query!("SELECT user_name FROM users",)
         .fetch_one(&app.db_pool)
         .await
-        .expect("Failed to fetch saved user.");
+        .expect("Failed to fetch saved user");
 
     assert_eq!(saved.user_name, name);
 }
