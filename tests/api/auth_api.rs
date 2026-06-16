@@ -119,7 +119,7 @@ async fn cant_signup_with_invalid_password_one_that_cant_be_parsed() {
 //confirm that you can sign up with valid data
 // confirm that the side effects of signing up actually work as expected, that is the user exists in the db post the handler invocation
 #[tokio::test]
-async fn create_user_account_persists_the_new_user() {
+async fn sign_up_returns_201() {
     let name = "random-tom-username";
     let pass = "()^%$£**£>?-random-password";
     // Arrange
@@ -139,7 +139,24 @@ async fn create_user_account_persists_the_new_user() {
         "The API failed to accept the signup request. Response body: {:?}",
         response.text().await // Prints the server's error message if it fails
     );
+}
+//confirm that you can sign up with valid data
+// confirm that the side effects of signing up actually work as expected, that is the user exists in the db post the handler invocation
+#[tokio::test]
+async fn create_user_account_persists_the_new_user() {
+    let name = "random-tom-username";
+    let pass = "()^%$£**£>?-random-password";
+    // Arrange
+    let app = spawn_app().await;
+    let signup_body = serde_json::json!({
+        "name": name,
+        "password": pass
+    });
 
+    // Act
+     app.post_signup(&signup_body).await;
+
+    // Assert
     let saved = sqlx::query!("SELECT user_name FROM users",)
         .fetch_one(&app.db_pool)
         .await
