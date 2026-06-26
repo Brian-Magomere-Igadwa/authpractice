@@ -20,7 +20,7 @@ impl From<UserPassword> for Secret<String> {
 
 impl UserPassword {
     /// Parse and validate a password following NIST SP 800-63B guidelines.
-    pub async fn parse(s: String) -> Result<UserPassword, String> {
+    pub async fn parse(s: String, hibp_base_url: &str) -> Result<UserPassword, String> {
         // 1. Minimum length: 8 characters, Maximum length: 64 characters (per your spec)
         if s.len() < 8 {
             return Err("Password must be at least 8 characters long.".to_string());
@@ -32,7 +32,7 @@ impl UserPassword {
         }
 
         // 2. Blocklist verification via K-Anonymity HIBP API
-        if Self::is_in_blocklist(&s).await? {
+        if Self::is_in_blocklist(&s, hibp_base_url).await? {
             return Err(
                 "Password is insecure: it has been found in global data breaches, please change it.".to_string(),
             );
@@ -44,7 +44,7 @@ impl UserPassword {
     /// Internal helper to execute the K-Anonymity check against HIBP
     /// There's a cost of network latency, a cost am willing to pay to make
     /// sure the users are safe particularly during sign up.
-    async fn is_in_blocklist(password: &str) -> Result<bool, String> {
+    async fn is_in_blocklist(password: &str, base_url: &str) -> Result<bool, String> {
         // Hash the candidate password using SHA-1
         let mut hasher = Sha1::new();
         hasher.update(password.as_bytes());
@@ -58,7 +58,10 @@ impl UserPassword {
         let suffix = &hash_hex[5..];
 
         // Send ONLY the 5-character prefix to the API
-        let url = format!("https://api.pwnedpasswords.com/range/{}", prefix);
+        // Dynamically target our configuration path 
+        let url = format!("{}/range/{}", base_url, prefix);
+
+        // let url = format!("https://api.pwnedpasswords.com/range/{}", prefix);
 
         let response = reqwest::get(&url)
             .await
@@ -132,6 +135,8 @@ mod tests {
     use argon2::PasswordVerifier;
     use claim::{assert_err, assert_ok};
 
+    const LIVE_HIBP_URL: &str = "https://api.pwnedpasswords.com";
+
     // Invalids
     #[tokio::test]
     async fn pass_less_than_set_minimum_is_rejected() {
@@ -139,7 +144,7 @@ mod tests {
         let pass = "short12".to_string();
 
         // [Act] Resolve the future first
-        let result = UserPassword::parse(pass).await;
+        let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert] Check the final Result cleanly
         assert_err!(result);
@@ -151,7 +156,7 @@ mod tests {
         let pass = "a".repeat(65);
 
         // [Act]
-        let result = UserPassword::parse(pass).await;
+        let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
         assert_err!(result);
@@ -163,7 +168,7 @@ mod tests {
         let pass = "password123".to_string();
 
         // [Act]
-        let result = UserPassword::parse(pass).await;
+        let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
         assert_err!(result);
@@ -176,7 +181,7 @@ mod tests {
         let pass = "Xy7!pQ9@mZ2$".to_string();
 
         // [Act]
-        let result = UserPassword::parse(pass).await;
+        let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
         assert_ok!(result);
@@ -188,7 +193,7 @@ mod tests {
         let pass = "Correct-Horse-Battery-Staple-2026!".to_string();
 
         // [Act]
-        let result = UserPassword::parse(pass).await;
+        let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
         assert_ok!(result);
