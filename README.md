@@ -13,6 +13,7 @@ The system relies on a dual-layer storage strategy—utilizing **Postgres** for 
 Check out more about the [benchmarks](./load_tests/benchmarks/)
 
 
+
 ---
 
 ## System Architecture
@@ -70,37 +71,6 @@ sequenceDiagram
 
 ---
 
-## Getting Started
-
-### 1. Initialize the Infrastructure
-
-A dedicated initialization script is provided to spin up and configure your local environment dependencies (such as the database container - authpracticedb ) seamlessly.
-
-```bash
-./scripts/init_db.sh
-
-```
-
-### 2. High-Response Local Development Loop
-
-For a rapid feedback loop on code changes, utilize `cargo watch` to automatically trigger check routines and binary execution on save:
-
-```bash
-cargo watch -x check -x run
-
-```
-
-### 3. Local Testing
-
-To run tests:
-
-```bash
-cargo test
-
-```
-
----
-
 ## Development Methodology
 
 This project strictly adheres to **Test-Driven Development (TDD)** utilizing the **Red, Green, Refactor** workflow loop:
@@ -147,16 +117,88 @@ This project strictly adheres to **Test-Driven Development (TDD)** utilizing the
 
 ---
 
-## Instructions to run the project
+## Getting Started
 
-To run the project simply run:
+### 1. Initialize the Infrastructure
+
+The project has a couple of moving pieces, for that reason I opted to have a section here to take someone who is new through how they would set up the project.
+
+## Local Development & Observation Ecosystem
+
+This project is fully instrumented for performance testing. It leverages a localized telemetry stack (Prometheus, Loki, Grafana) to analyze application bottlenecks under simulated loads.
+
+---
+
+### 1. Quick Start Infrastructure Loop
+
+To get the core containers, third-party mocks, and telemetry suites up and running, follow this sequence:
 
 ```bash
- docker compose up -d
+# Step A: Initialize core database configurations & containers; This one will be useful for cargo test
+./scripts/init_db.sh
+
+# Step B: Spin up the telemetry and mock service ecosystem
+docker compose up -d
+
+# Step C: Manually run your database schema migrations
+# Open to hearing ways to shortcircuit this so that we dont have to remember to run it every time.
+sqlx migrate run
 ```
 
-Then run the following to apply migrations before proceeding with further exploration:
+
+
+> **Important:** Always ensure `docker compose up -d` has finished initializing the Postgres cluster completely before executing `sqlx migrate run` on your host machine.
+
+---
+
+### 2. High-Response Local Development
+
+For a rapid feedback loop on code changes, run `cargo watch` on your host machine. This binds directly to your local Postgres port (`127.0.0.1:5432`) as configured in your `.env` file:
 
 ```bash
- sqlx migrate run
+cargo watch -x check -x run
+
 ```
+
+---
+
+### 3. Verification & Testing
+
+Our endpoints are verified via a hermetic mock environment using a local WireMock service (`hibp-mock`) to simulate third-party API limits safely.
+I opted specifically for this because otherwise we would basically be assaulting the official hibp server when load testing with k6, even if we insisted on using that we would need to grab a pta (Permission to attack) which just costs us more time than just straight up simulating it ourselves. At the end of the day we just care to test if a delay caused by a network io operation bars other users early on.
+
+```bash
+# Run the native test suites
+# Make sure you have run ./scripts/init_db.sh first which will make the db which we would need for this.
+cargo test
+
+```
+
+---
+
+### 4. Telemetry & Observation Control Center
+
+Once your environment is up, you can monitor system behavior, log traces, and runtime performance histograms in real-time at the following endpoints:
+
+| Service           | Local URL                                                                      | Default Credentials | Purpose                            |
+| ----------------- | ------------------------------------------------------------------------------ | ------------------- | ---------------------------------- |
+| **Grafana**       | [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) | `admin` / `admin`   | Unified Metrics & Loki Log Panels  |
+| **Prometheus**    | [http://localhost:9090](https://www.google.com/search?q=http://localhost:9090) | _None_              | Raw Metrics Scraper Hub            |
+| **cAdvisor**      | [http://localhost:8080](https://www.google.com/search?q=http://localhost:8080) | _None_              | Real-time Container Resource Stats |
+| **Node Exporter** | [http://localhost:9100](https://www.google.com/search?q=http://localhost:9100) | _None_              | Host Machine Hardware Diagnostics  |
+
+###  Tracking Errors in Grafana Explore
+
+1. Navigate to **Grafana Explore** (`http://localhost:3000/explore`).
+2. Select the **Loki** data source.
+3. Paste the following LogQL query into the query box to extract your fields and cleanly translate Bunyan's numeric logging dictionary into standard text severities (`info`, `warn`, `error`):
+
+```logql
+{container="auth-practice-app-1"} | json | label_format level=`{{ if eq .level "30" }}info{{ else if eq .level "40" }}warn{{ else if eq .level "50" }}error{{ else }}fatal{{ end }}`
+
+```
+
+4. Expand any specific failing log line inside the dashboard drawer to locate its unique transaction **`request_id`** (e.g., `76b9875a-b690-4f14-a8a4-33bde98bd685`).
+5. Isolate that ID using `|= "YOUR_REQUEST_ID"` to reconstruct the chronological timeline of exactly what that thread did across your framework spans!
+
+
