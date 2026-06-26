@@ -13,6 +13,33 @@ jobs:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Install postgresql-client so the script's `psql` check passes
+      - name: Install psql client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      # Install the sqlx-cli for migrations
+      - name: Install SQLx CLI
+        run: cargo install sqlx-cli --no-default-features --features postgres
+      # Create the database and run migrations
+      # (This replaces 'sqlx database create' and 'sqlx migrate run' from your script)
+      # 3. Run your local setup script exactly as you do on your machine
+      - name: Initialize Database via Script
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+        run: |
+          chmod +x ./scripts/init_db.sh
+          ./scripts/init_db.sh
+      - name: Run Migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          sqlx database create
+          sqlx migrate run
       # 1. Spin up your local DB environment inside the runner
       - name: Initialize Database
         run: |
