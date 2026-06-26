@@ -1,4 +1,5 @@
 application:
   host: 0.0.0.0
+  hibp_api_url: "https://api.pwnedpasswords.com"
 database:
   require_ssl: false
