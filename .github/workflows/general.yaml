@@ -40,11 +40,6 @@ jobs:
         run: |
           sqlx database create
           sqlx migrate run
-      # 1. Spin up your local DB environment inside the runner
-      - name: Initialize Database
-        run: |
-          chmod +x ./scripts/init_db.sh
-          ./scripts/init_db.sh
       - name: Run tests
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
