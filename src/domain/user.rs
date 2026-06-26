@@ -3,5 +3,3 @@ pub struct User {
     pub name: UserName,
     pub password: UserPassword,
 }
-
-

@@ -58,7 +58,7 @@ impl UserPassword {
         let suffix = &hash_hex[5..];
 
         // Send ONLY the 5-character prefix to the API
-        // Dynamically target our configuration path 
+        // Dynamically target our configuration path
         let url = format!("{}/range/{}", base_url, prefix);
 
         // let url = format!("https://api.pwnedpasswords.com/range/{}", prefix);
