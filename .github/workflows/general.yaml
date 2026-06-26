@@ -28,7 +28,7 @@ jobs:
       - name: Install & Build Load Tests
         run: |
           cd load_tests
-          pnpm install --frozen-lockfile
+          pnpm install
           pnpm run bundle
       # Install postgresql-client so the script's `psql` check passes
       - name: Install psql client
