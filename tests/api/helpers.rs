@@ -6,7 +6,10 @@ use once_cell::sync::Lazy;
 use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::net::TcpListener;
+use std::time::Duration;
 use uuid::Uuid;
+use wiremock::matchers::{method, path_regex};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // Ensure that the `tracing` stack is only initialised once using `once_cell`
 static TRACING: Lazy<()> = Lazy::new(|| {
@@ -25,6 +28,19 @@ pub struct TestApp {
     pub address: String,
     pub db_pool: PgPool,
     pub api_client: reqwest::Client,
+    pub hibp_server: MockServer,
+}
+
+/// Determines the network routing target for the Have I Been Pwned (HIBP) API.
+pub enum HibpTarget {
+    /// Routes requests to an isolated local `wiremock` server.
+    /// Use this for load/stress testing to simulate network latency without
+    /// assaulting the production HIBP API.
+    Mock,
+
+    /// Routes requests directly to the live production `https://api.pwnedpasswords.com`.
+    /// Use this for end-to-end integration tests validating real-world password constraints.
+    LiveProduction,
 }
 
 impl TestApp {
@@ -49,17 +65,56 @@ impl TestApp {
     }
 }
 
-pub async fn spawn_app() -> TestApp {
+/// Boots up a completely isolated, temporary instance of the application runtime.
+///
+/// This helper initializes a fresh database context, spins up the Actix Web server on a
+/// random local port, and configures the HIBP integration according to the selected `hibp_target`.
+///
+/// # Arguments
+/// * `hibp_target` - Choose `HibpTarget::Mock` to inject an artificial network latency pipeline (useful for load testing),
+///   or `HibpTarget::LiveProduction` to hit the real hibp api.
+/// Mostly we just use the production option when doing tests that
+/// dont hit the hibp api more than once per test and the mock is preffered otherwise
+/// to avoid assualting the real hibp api when performing our load tests with k6.
+///
+/// # Examples
+/// ```rust
+/// // Testing real-world validation
+/// let app = spawn_app(HibpTarget::LiveProduction).await;
+/// ```
+pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
     Lazy::force(&TRACING);
 
+    // Launch the mock HIBP server first on a random local port
+    let mock_hibp_server = MockServer::start().await;
+
+    // We are simulating this because we'd need a permission to attack (PTA) to just load test
+    // our own sign up, so this is a much less stressful way that avoids all that.
+    // Instruct the Mock to mimic HIBP's range API and hold connections for 250ms
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
     // We retrieve the port assigned to us by the OS
     let port = listener.local_addr().unwrap().port();
 
     let mut configuration = get_configuration().expect("Failed to read configuration.");
     configuration.database.database_name = Uuid::new_v4().to_string();
+    // This is entirely isolated to this test thread execution context.
+    // Read the enum target to decide where to route the application configuration!
+    match hibp_target {
+        HibpTarget::Mock => {
+            configuration.application.hibp_api_url = mock_hibp_server.uri();
+        }
+        HibpTarget::LiveProduction => {
+            configuration.application.hibp_api_url = "https://api.pwnedpasswords.com".to_string();
+        }
+    }
+
     let connection_pool = configure_database(&configuration.database).await;
-    let server = run(listener, connection_pool.clone()).expect("Failed to bind address");
+    let server = run(
+        listener,
+        connection_pool.clone(),
+        configuration.application.hibp_api_url.clone(),
+    )
+    .expect("Failed to bind address");
     let _ = tokio::spawn(server);
 
     // We return the application address to the caller!
@@ -75,6 +130,7 @@ pub async fn spawn_app() -> TestApp {
         address,
         db_pool: connection_pool,
         api_client: client,
+        hibp_server: mock_hibp_server,
     }
 }
 
