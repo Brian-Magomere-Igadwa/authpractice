@@ -1,8 +1,17 @@
 # Secure Authentication & Session Lifecycle Backend
 
-This project is a robust, production-ready authentication and user management system built with Rust. This backend is engineered from the ground up with defensive design patterns, high-concurrency optimizations, compile-time safety, and comprehensive observability.
+This project is a robust, production-ready authentication and user management system proudly built with Rust. This backend is engineered from the ground up with defensive design patterns, high-concurrency optimizations, compile-time safety, and comprehensive observability.
 
 The system relies on a dual-layer storage strategy—utilizing **Postgres** for persistent user data and **Redis** for fast, reliable session management—while explicitly preparing the codebase to gracefully withstand heavy loads and distributed stress.
+
+| Endpoint          | Test Type                                                                    | Max Concurrent VUs | Target Throughput | p(95) Latency | Status / Bottleneck      |
+| :---------------- | :--------------------------------------------------------------------------- | :----------------- | :---------------- | :------------ | :----------------------- |
+| **POST** `/users` | [Load Test](./load_tests/benchmarks/signup_scenario_tests_summary.json)      | 50 VUs             | 170 req/s         | 415ms         | Pass (Release Profile)   |
+| **POST** `/users` | [Scale Peak](./load_tests/benchmarks/signup_scenario_66vu_peak_summary.json) | 66 VUs             | 221 req/s         | 450.0ms       | Pass (Maximum Safe Load) |
+| **POST** `/users` | [Stress Test](./load_tests/benchmarks/signup_stress_90vu_break.json)         | 90 VUs             | 236 req/s         | 749ms         | **Fails Threshold**      |
+
+Check out more about the [benchmarks](./load_tests/benchmarks/)
+
 
 ---
 
@@ -135,3 +144,12 @@ This project strictly adheres to **Test-Driven Development (TDD)** utilizing the
 ### Phase 3: High-Load Stress Testing & Optimization
 
 - [ ] **Conduct stress and load testing on authentication endpoints:** Simulate high-concurrency spikes on `/signup` and `/login` (including rapid consecutive requests from single sources). Identify performance bottlenecks, ensure the server maintains availability under heavy load, and implement optimizations or rate-limiting where necessary.
+
+---
+
+## Instructions to run the project
+
+To run the project simply run:
+`bash docker compose up -d`
+Then run the following to apply migrations before proceeding with further exploration:
+`bash sqlx migrate run`
