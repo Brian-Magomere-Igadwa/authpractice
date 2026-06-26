@@ -145,7 +145,8 @@ async fn hibp_and_argon2_workload_dont_regress_availability_under_load_with_k6()
             "grafana/k6:latest",
             "run",
             //  Directs k6 to dump raw stat metrics to JSON before ending execution
-            "--summary-export=/apps/benchmarks/signup_scenario_tests_summary.json",
+            // keeping this off because ofcourse this is only meant to store when testing k6 on dev machine
+            // "--summary-export=/apps/benchmarks/signup_scenario_tests_summary.json",
             "/apps/dist/signup_stress.js",
         ])
         .output()
