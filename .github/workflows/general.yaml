@@ -13,6 +13,11 @@ jobs:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # 1. Spin up your local DB environment inside the runner
+      - name: Initialize Database
+        run: |
+          chmod +x ./scripts/init_db.sh
+          ./scripts/init_db.sh
       - name: Run tests
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
