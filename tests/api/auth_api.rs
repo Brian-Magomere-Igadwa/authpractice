@@ -227,7 +227,7 @@ async fn sign_up_returns_201() {
         response.status().as_u16(),
         201,
         "The API failed to accept the signup request. Response body: {:?}",
-        response.text().await // Prints the server's error message if it fails
+        response.text().await
     );
 }
 //confirm that you can sign up with valid data
