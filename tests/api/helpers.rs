@@ -92,7 +92,8 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
     // We are simulating this because we'd need a permission to attack (PTA) to just load test
     // our own sign up, so this is a much less stressful way that avoids all that.
     // Instruct the Mock to mimic HIBP's range API and hold connections for 250ms
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
+    // let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
+    let listener = TcpListener::bind("0.0.0.0:0").expect("Failed to bind random port");
     // We retrieve the port assigned to us by the OS
     let port = listener.local_addr().unwrap().port();
 

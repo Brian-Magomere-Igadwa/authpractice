@@ -112,7 +112,7 @@ async fn hibp_and_argon2_workload_dont_regress_availability_under_load_with_k6()
 
     // Map 'localhost' to the special Docker host routing address
     // If app.address is "http://127.0.0.1:4321", we swap it for Docker's host bridge
-    let docker_target_address = app.address.replace("127.0.0.1", "host.docker.internal");
+    let docker_target_address = app.address.replace("0.0.0.0", "host.docker.internal");
 
     let project_root =
         std::env::current_dir().expect("Failed to determine current workspace directory");
