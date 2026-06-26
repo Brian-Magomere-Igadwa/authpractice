@@ -1,0 +1,156 @@
+{
+    "metrics": {
+        "http_req_duration{expected_response:true}": {
+            "min": 0.450137,
+            "med": 63.839674,
+            "max": 775.307523,
+            "p(90)": 412.5133238,
+            "p(95)": 450.2602313999999,
+            "avg": 187.1558665681069
+        },
+        "http_req_receiving": {
+            "p(90)": 0.22054919999999997,
+            "p(95)": 0.30894479999999985,
+            "avg": 0.11695004687079097,
+            "min": 0.012573,
+            "med": 0.06591,
+            "max": 52.92714
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 11137,
+            "thresholds": {
+                "rate<0.001": false
+            },
+            "value": 0
+        },
+        "http_req_connecting": {
+            "max": 14.444309,
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0.012075244859477412,
+            "min": 0,
+            "med": 0
+        },
+        "data_sent": {
+            "count": 1707933,
+            "rate": 33950.867388275874
+        },
+        "checks": {
+            "passes": 11137,
+            "fails": 0,
+            "value": 1
+        },
+        "http_req_waiting": {
+            "avg": 186.99100521630595,
+            "min": 0.418536,
+            "med": 63.512546,
+            "max": 774.479032,
+            "p(90)": 412.3750998,
+            "p(95)": 450.0909633999999
+        },
+        "vus": {
+            "value": 1,
+            "min": 1,
+            "max": 66
+        },
+        "http_req_blocked": {
+            "p(90)": 0.013879,
+            "p(95)": 0.017943999999999995,
+            "avg": 0.02499615021998736,
+            "min": 0.002498,
+            "med": 0.007822,
+            "max": 14.703278
+        },
+        "data_received": {
+            "count": 863115,
+            "rate": 17157.290658258687
+        },
+        "vus_max": {
+            "min": 66,
+            "max": 66,
+            "value": 66
+        },
+        "http_req_sending": {
+            "p(90)": 0.05832499999999998,
+            "p(95)": 0.1143921999999997,
+            "avg": 0.04791130492951418,
+            "min": 0.006565,
+            "med": 0.023266,
+            "max": 16.101119
+        },
+        "iteration_duration": {
+            "avg": 477.76736859446896,
+            "min": 377.893623,
+            "med": 472.77963950000003,
+            "max": 879.452927,
+            "p(90)": 557.0961559,
+            "p(95)": 596.4436988
+        },
+        "http_req_tls_handshaking": {
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "http_req_duration": {
+            "med": 63.839674,
+            "max": 775.307523,
+            "p(90)": 412.5133238,
+            "p(95)": 450.2602313999999,
+            "avg": 187.1558665681069,
+            "min": 0.450137,
+            "thresholds": {
+                "p(95)<500": false
+            }
+        },
+        "http_reqs": {
+            "count": 11137,
+            "rate": 221.3850368271053
+        },
+        "iterations": {
+            "count": 5568,
+            "rate": 110.68257924515778
+        }
+    },
+    "root_group": {
+        "groups": {
+            "setup": {
+                "path": "::setup",
+                "id": "5c0f8025f7e0b6654089e5b00e950f1a",
+                "groups": {},
+                "checks": {
+                        "API is alive and reachable": {
+                            "path": "::setup::API is alive and reachable",
+                            "id": "ce60f2550851d079987f9e8d4e9a5307",
+                            "passes": 1,
+                            "fails": 0,
+                            "name": "API is alive and reachable"
+                        }
+                    },
+                "name": "setup"
+            }
+        },
+        "checks": {
+            "Signup response was 201": {
+                "path": "::Signup response was 201",
+                "id": "8bbf36431a0c5a65f7c97dabc57b53bd",
+                "passes": 5568,
+                "fails": 0,
+                "name": "Signup response was 201"
+            },
+            "System Health check returned 200": {
+                "path": "::System Health check returned 200",
+                "id": "d89fd7b50c7183908f944a00aa6eb530",
+                "passes": 5568,
+                "fails": 0,
+                "name": "System Health check returned 200"
+            }
+        },
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e"
+    }
+}

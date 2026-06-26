@@ -6,3 +6,4 @@ pnpm-lock.yaml
 # BUT do not ignore these critical infrastructure files!(Ignore all .json files excepts these ones below)
 !package.json
 !tsconfig.json
+!benchmarks/*.json
