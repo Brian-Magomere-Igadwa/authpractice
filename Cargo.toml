@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { version = "1.49.0", features = [
+    "macros",
+    "rt-multi-thread",
+    "process",
+] }
 actix-web = "4"
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 serde-aux = "4.7.0"
 config = "0.15.19"
@@ -34,6 +38,8 @@ thiserror = "2.0.18"
 anyhow = "1.0.102"
 sha1 = "0.11.0"
 rand = { version = "0.8", features = ["std_rng"] }
+metrics = "0.24.6"
+metrics-exporter-prometheus = "0.18.3"
 
 [dependencies.sqlx]
 version = "0.8.6"
