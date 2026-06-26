@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 // use validator::validate_email;
 use crate::domain::{User, UserName, UserPassword, create_credential};
+use crate::startup::ApplicationBaseUrl;
 
 #[derive(serde::Deserialize)]
 pub struct FormData {
@@ -63,7 +64,7 @@ pub fn error_chain_fmt(
 
 #[tracing::instrument(
     name = "Adding a new user",
-    skip(form, pool),
+    skip(form, pool,hibp_url),
     fields(
         user_name = %form.name,
     )
@@ -71,19 +72,43 @@ pub fn error_chain_fmt(
 pub async fn create_user_account(
     form: web::Json<FormData>,
     pool: web::Data<PgPool>,
+    hibp_url: web::Data<ApplicationBaseUrl>,
 ) -> Result<HttpResponse, SignUpError> {
+    // increment active gauge on request entry
+    metrics::gauge!("auth_signup_active_requests").increment(1.0);
+    let start_time = std::time::Instant::now();
+
     let form_data = form.into_inner();
 
-    // 2. Call the associated async function on User and explicitly .await it
-    let new_user = User::try_from_form(form_data)
+    // Call the associated async function on User and explicitly .await it
+    let new_user = User::try_from_form(form_data, &hibp_url.0)
         .await
-        .map_err(SignUpError::ValidationError)?;
+        .map_err(|e| {
+            // Record failure counter on validation break
+            metrics::counter!("auth_signup_total", "status" => "validation_error").increment(1);
+            SignUpError::ValidationError(e)
+        })?;
 
-    // 3. Insert the newly verified domain model into your DB
-    match insert_user(&pool, new_user).await {
-        Ok(_) => Ok(HttpResponse::Created().finish()),
-        Err(e) => Err(SignUpError::UnexpectedError(e.into())),
-    }
+    // Insert the newly verified domain model into your DB
+    let result = match insert_user(&pool, new_user).await {
+        Ok(_) => {
+            metrics::counter!("auth_signup_total", "status" => "success").increment(1);
+            Ok(HttpResponse::Created().finish())
+        }
+        Err(e) => {
+            metrics::counter!("auth_signup_total", "status" => "db_error").increment(1);
+            Err(SignUpError::UnexpectedError(e.into()))
+        }
+    };
+
+    //  Performance Tracking - calculate exact elapsed duration before return
+    let duration = start_time.elapsed();
+    metrics::histogram!("auth_signup_duration_seconds").record(duration.as_secs_f64());
+
+    // Decrement the active gauge since this task thread loop is finished
+    metrics::gauge!("auth_signup_active_requests").decrement(1.0);
+
+    result
 }
 
 // Assuming user already created an account

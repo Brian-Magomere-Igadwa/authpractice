@@ -29,6 +29,7 @@ pub struct ApplicationSettings {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
     pub host: String,
+    pub hibp_api_url: String,
 }
 
 impl DatabaseSettings {
@@ -94,7 +95,12 @@ pub fn get_configuration() -> Result<Settings, config::ConfigError> {
 
     // Add in settings from environment variables (with a prefix of APP and '__' as separator)
     // E.g. `APP_APPLICATION__PORT=5001 would set `Settings.application.port`
-    let settings = settings.add_source(config::Environment::with_prefix("app").separator("__"));
+    // let settings = settings.add_source(config::Environment::with_prefix("app").separator("__"));
+    let settings = settings.add_source(
+        config::Environment::with_prefix("APP")
+            .prefix_separator("_")
+            .separator("__"),
+    );
 
     // Try to convert the configuration values it read into
     // our Settings type

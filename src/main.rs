@@ -2,7 +2,7 @@ use std::net::TcpListener;
 
 use authpractice::{
     configuration::get_configuration,
-    startup::run,
+    startup::{init_metrics_recorder, run},
     telemetry::{get_subscriber, init_subscriber},
 };
 use sqlx::postgres::PgPoolOptions;
@@ -12,6 +12,9 @@ async fn main() -> std::io::Result<()> {
     //telemetry setup
     let subscriber = get_subscriber("authpractice".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
+
+    // Initialize Prometheus global recorder ONCE
+    init_metrics_recorder();
 
     // Bubble up the io::Error if we failed to bind the address
     let configuration = get_configuration().expect("Failed to read configuration.");
@@ -25,6 +28,11 @@ async fn main() -> std::io::Result<()> {
     );
     let listener = TcpListener::bind(address)?;
 
-    run(listener, connection_pool)?.await?;
+    run(
+        listener,
+        connection_pool,
+        configuration.application.hibp_api_url,
+    )?
+    .await?;
     Ok(())
 }

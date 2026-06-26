@@ -6,10 +6,8 @@ use once_cell::sync::Lazy;
 use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::net::TcpListener;
-use std::time::Duration;
 use uuid::Uuid;
-use wiremock::matchers::{method, path_regex};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::MockServer;
 
 // Ensure that the `tracing` stack is only initialised once using `once_cell`
 static TRACING: Lazy<()> = Lazy::new(|| {
@@ -22,6 +20,9 @@ static TRACING: Lazy<()> = Lazy::new(|| {
         let subscriber = get_subscriber(subscriber_name, default_filter_level, std::io::sink);
         init_subscriber(subscriber);
     };
+
+    // Safely initialize the metrics global state once for the test sweeps
+    authpractice::startup::init_metrics_recorder();
 });
 
 pub struct TestApp {
