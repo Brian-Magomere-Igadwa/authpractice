@@ -150,6 +150,13 @@ This project strictly adheres to **Test-Driven Development (TDD)** utilizing the
 ## Instructions to run the project
 
 To run the project simply run:
-`bash docker compose up -d`
+
+```bash
+ docker compose up -d
+```
+
 Then run the following to apply migrations before proceeding with further exploration:
-`bash sqlx migrate run`
+
+```bash
+ sqlx migrate run
+```
