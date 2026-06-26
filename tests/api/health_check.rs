@@ -1,9 +1,9 @@
-use crate::helpers::spawn_app;
+use crate::helpers::{HibpTarget, spawn_app};
 
 #[tokio::test]
 async fn health_check_works() {
     //Arrange
-    let app = spawn_app().await;
+    let app = spawn_app(HibpTarget::LiveProduction).await;
 
     // Act
     let response = app.health_check().await;
