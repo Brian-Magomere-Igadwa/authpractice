@@ -1,0 +1,112 @@
+# todo(change this to the real hibp api ep later)
+# it currently is pointing at a mock container
+# to avoid uknowingly ddosing the hibp server
+# while conducting load tests on a production-like environment
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "55384:55384"
+    environment:
+      # - APP_ENVIRONMENT=local
+      - APP_ENVIRONMENT=production
+      - APP_APPLICATION__HOST=0.0.0.0
+      - APP_APPLICATION__PORT=55384
+      - APP_DATABASE__DATABASE_NAME=${POSTGRES_DB}
+      - APP_DATABASE__HOST=postgres
+      - APP_DATABASE__PORT=${POSTGRES_PORT}
+      - APP_HIBP__API_URL=http://hibp-mock:8080
+    depends_on:
+      postgres:
+        condition: service_started
+      hibp-mock:
+        condition: service_healthy
+
+  hibp-mock:
+    image: wiremock/wiremock:latest
+    container_name: hibp-mock
+    ports:
+      - "8089:8080" # Exposes it locally at 8089 if you want to curl it from your host
+    volumes:
+      - ./monitoring/wiremock:/home/wiremock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/__admin/mappings"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    command: ["postgres", "-N", "1000"]
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yaml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+  # cAdvisor- continer advisor
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    privileged: true
+    user: root
+    volumes:
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8080:8080"
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+    ports:
+      - "9100:9100"
+
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-data:/loki # ◄ Persists telemetry data locally
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./monitoring/promtail:/etc/promtail
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./monitoring/grafana-storage:/var/lib/grafana

@@ -1,3 +1,6 @@
 /target
 .env
 Cargo.lock
+.DS_Store
+/monitoring/loki-data
+/monitoring/grafana-storage

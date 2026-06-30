@@ -29,6 +29,7 @@ pub struct ApplicationSettings {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
     pub host: String,
+    pub hibp_api_url: String,
 }
 
 impl DatabaseSettings {
@@ -43,16 +44,14 @@ impl DatabaseSettings {
         PgConnectOptions::new()
             .host(&self.host)
             .username(&self.username)
-            .password(&self.password.expose_secret())
+            .password(self.password.expose_secret())
             .port(self.port)
             .ssl_mode(ssl_mode)
     }
     pub fn with_db(&self) -> PgConnectOptions {
-        let options = self
-            .without_db()
+        self.without_db()
             .database(&self.database_name)
-            .log_statements(tracing::log::LevelFilter::Trace);
-        options
+            .log_statements(tracing::log::LevelFilter::Trace)
     }
 
     pub fn connection_string(&self) -> Secret<String> {
@@ -94,7 +93,12 @@ pub fn get_configuration() -> Result<Settings, config::ConfigError> {
 
     // Add in settings from environment variables (with a prefix of APP and '__' as separator)
     // E.g. `APP_APPLICATION__PORT=5001 would set `Settings.application.port`
-    let settings = settings.add_source(config::Environment::with_prefix("app").separator("__"));
+    // let settings = settings.add_source(config::Environment::with_prefix("app").separator("__"));
+    let settings = settings.add_source(
+        config::Environment::with_prefix("APP")
+            .prefix_separator("_")
+            .separator("__"),
+    );
 
     // Try to convert the configuration values it read into
     // our Settings type

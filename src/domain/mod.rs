@@ -1,7 +1,8 @@
-mod new_user;
-mod user_email;
+mod password;
+mod user;
 mod user_name;
 
-pub use new_user::User;
-pub use user_email::UserEmail;
+pub use password::{UserPassword, create_credential};
+
+pub use user::User;
 pub use user_name::UserName;

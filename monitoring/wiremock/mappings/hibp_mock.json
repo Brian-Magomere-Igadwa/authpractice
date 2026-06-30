@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPattern": "/api/v3/pwnedpassword/.*"
+  },
+  "response": {
+    "status": 200,
+    "body": "0018A45C4D1DEF81644B54AB7F969B18586:3\n001D4DEE5143A18C2C8042DAE82B18A61D2:1",
+    "headers": {
+      "Content-Type": "text/plain"
+    },
+    "fixedDelayMilliseconds": 250
+  }
+}

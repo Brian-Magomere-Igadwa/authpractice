@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { version = "1.49.0", features = [
+    "macros",
+    "rt-multi-thread",
+    "process",
+] }
 actix-web = "4"
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 serde-aux = "4.7.0"
 config = "0.15.19"
@@ -22,11 +26,21 @@ tracing-actix-web = "0.7.21"
 reqwest = { version = "0.13.1", default-features = false, features = [
     "json",
     "rustls",
+    "cookies",
 ] }
 chrono = "0.4.43"
 validator = { version = "0.16", features = ["derive"] }
 claim = "0.5.0"
 unicode-segmentation = "1.12.0"
+base64 = "0.13"
+argon2 = { version = "0.5.3", features = ["std"] }
+thiserror = "2.0.18"
+anyhow = "1.0.102"
+sha1 = "0.11.0"
+rand = { version = "0.8", features = ["std_rng"] }
+metrics = "0.24.6"
+metrics-exporter-prometheus = "0.18.3"
+time = ">= 0.3, < 0.3.48"
 
 [dependencies.sqlx]
 version = "0.8.6"

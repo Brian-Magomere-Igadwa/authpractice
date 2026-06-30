@@ -1,0 +1,12 @@
+{
+  "name": "load-tests",
+  "private": true,
+  "scripts": {
+    "bundle": "esbuild scenarios/*.ts --bundle --outdir=dist --target=es2020 --format=esm --external:k6*"
+  },
+  "devDependencies": {
+    "@types/k6": "^0.54.2",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.5.2"
+  }
+}

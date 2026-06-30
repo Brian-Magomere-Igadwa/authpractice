@@ -1,0 +1,5 @@
+packages:
+  - "load_tests"
+  - "apps/**"
+allowBuilds:
+  esbuild: true
