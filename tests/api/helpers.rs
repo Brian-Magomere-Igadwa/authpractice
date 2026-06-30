@@ -5,6 +5,7 @@ use authpractice::telemetry::{get_subscriber, init_subscriber};
 use once_cell::sync::Lazy;
 use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
+use std::env;
 use std::net::TcpListener;
 use uuid::Uuid;
 use wiremock::MockServer;
@@ -27,6 +28,7 @@ static TRACING: Lazy<()> = Lazy::new(|| {
 
 pub struct TestApp {
     pub address: String,
+    pub current_port: u16,
     pub db_pool: PgPool,
     pub api_client: reqwest::Client,
     pub hibp_server: MockServer,
@@ -64,6 +66,20 @@ impl TestApp {
             .await
             .expect("Failed to execute request.")
     }
+}
+
+pub fn get_docker_accessible_url(local_port: u16) -> String {
+    // If running in CI (GitHub Actions sets CI=true automatically),
+    // route to the standard Linux Docker bridge gateway IP.
+    let standard_linux_docker_bridge_gateway_ip = "172.17.0.1";
+    let host_ip = if env::var("CI").is_ok() {
+        standard_linux_docker_bridge_gateway_ip
+    } else {
+        // Local machines (Mac/Windows) handle this natively
+        "host.docker.internal"
+    };
+
+    format!("http://{}:{}", host_ip, local_port)
 }
 
 /// Boots up a completely isolated, temporary instance of the application runtime.
@@ -132,6 +148,7 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         db_pool: connection_pool,
         api_client: client,
         hibp_server: mock_hibp_server,
+        current_port: port,
     }
 }
 

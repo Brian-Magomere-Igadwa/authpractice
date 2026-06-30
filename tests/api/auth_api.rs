@@ -7,7 +7,7 @@ use wiremock::{
     matchers::{method, path_regex},
 };
 
-use crate::helpers::{HibpTarget, spawn_app};
+use crate::helpers::{HibpTarget, get_docker_accessible_url, spawn_app};
 
 #[tokio::test]
 async fn mis_shaped_auth_requests_are_rejected() {
@@ -113,10 +113,11 @@ async fn hibp_and_argon2_workload_dont_regress_availability_under_load_with_k6()
     // Map 'localhost' to the special Docker host routing address
     // If app.address is "http://127.0.0.1:4321", we swap it for Docker's host bridge
     // let docker_target_address = app.address.replace("127.0.0.1", "host.docker.internal");
-    let docker_target_address = app
-        .address
-        .replace("127.0.0.1", "host.docker.internal")
-        .replace("0.0.0.0", "host.docker.internal");
+    // let docker_target_address = app
+    //     .address
+    //     .replace("127.0.0.1", "host.docker.internal")
+    //     .replace("0.0.0.0", "host.docker.internal");
+    let docker_target_address = get_docker_accessible_url(app.current_port);
 
     let project_root =
         std::env::current_dir().expect("Failed to determine current workspace directory");
