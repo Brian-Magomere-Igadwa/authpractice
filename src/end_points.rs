@@ -1,3 +1,3 @@
-pub const AUTH: &'static str = "/auth";
-pub const USERS: &'static str = "/users";
-pub const HEALTH_CHECK: &'static str = "/health_check";
+pub const AUTH: &str = "/auth";
+pub const USERS: &str = "/users";
+pub const HEALTH_CHECK: &str = "/health_check";

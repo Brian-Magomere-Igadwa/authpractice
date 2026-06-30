@@ -79,12 +79,13 @@ impl UserPassword {
         // Parse the body line-by-line to find our suffix
         // The API returns lines formatted as: SUFFIX:COUNT (e.g., "0018A45C3511E589421A2EC645D003474F2:3")
         for line in body.lines() {
-            if let Some((returned_suffix, _count)) = line.split_once(':') {
-                if returned_suffix == suffix {
-                    return Ok(true);
-                }
+            if let Some((returned_suffix, _count)) = line.split_once(':')
+                && returned_suffix == suffix
+            {
+                return Ok(true);
             }
         }
+
         Ok(false)
     }
 }

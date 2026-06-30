@@ -97,7 +97,7 @@ pub async fn create_user_account(
         }
         Err(e) => {
             metrics::counter!("auth_signup_total", "status" => "db_error").increment(1);
-            Err(SignUpError::UnexpectedError(e.into()))
+            Err(SignUpError::UnexpectedError(e))
         }
     };
 
