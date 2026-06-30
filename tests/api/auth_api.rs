@@ -80,7 +80,7 @@ async fn cant_signup_with_invalid_user_name() {
 async fn hibp_and_argon2_workload_dont_regress_availability_under_load_with_k6() {
     // House keeping
     // Skip performance testing under coverage tracking due to instrumentation overhead
-    if std::env::var("TARPAULIN").is_ok() {
+    if std::env::var("TARPAULIN").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
         return;
     }
     // Arrange
