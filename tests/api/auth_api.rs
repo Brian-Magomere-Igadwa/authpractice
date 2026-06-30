@@ -78,6 +78,11 @@ async fn cant_signup_with_invalid_user_name() {
 
 #[tokio::test]
 async fn hibp_and_argon2_workload_dont_regress_availability_under_load_with_k6() {
+    // House keeping
+    // Skip performance testing under coverage tracking due to instrumentation overhead
+    if std::env::var("TARPAULIN").is_ok() {
+        return;
+    }
     // Arrange
     // Going with the mock option to avoid assaulting the real HIBP website
     // While testing
