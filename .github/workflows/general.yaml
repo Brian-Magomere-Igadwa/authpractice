@@ -92,14 +92,31 @@ jobs:
   coverage:
     name: Code coverage
     runs-on: ubuntu-latest
+    # 1. Launch PostgreSQL as a background service attached to this job
+    services:
+      postgres:
+        image: postgres:15 # Or whichever version your script uses
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: my_database
+        # Wait until postgres is healthy before starting the job steps
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     container:
       image: xd009642/tarpaulin
       options: --security-opt seccomp=unconfined
+
     steps:
       - name: Checkout repository
-        uses:
-          actions/checkout@v3
-          # Install postgresql-client so the script's `psql` check passes
+        uses: actions/checkout@v3
+
       - name: Install psql client
         run: |
           apt-get update
@@ -108,31 +125,23 @@ jobs:
       # Install the sqlx-cli for migrations
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features postgres
-      # Create the database and run migrations
-      # (This replaces 'sqlx database create' and 'sqlx migrate run' from your script)
-      # 3. Run your local setup script exactly as you do on your machine
-      - name: Initialize Database via Script
-        env:
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
-        run: |
-          chmod +x ./scripts/init_db.sh
-          ./scripts/init_db.sh
+
+      # 2. SKIP init_db.sh (since GitHub already started Postgres) and run migrations
       - name: Run Migrations
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Note: In GitHub Actions containers, services are accessible via their service name as the hostname
+          DATABASE_URL: postgres://postgres:password@postgres:5432/my_database
         run: |
           sqlx database create
           sqlx migrate run
+
       - name: Generate code coverage
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
-          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+          DATABASE_URL: postgres://postgres:password@postgres:5432/my_database
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: my_database
+          POSTGRES_HOST: postgres
+          POSTGRES_PORT: 5432
         run: |
           cargo tarpaulin --verbose --workspace
