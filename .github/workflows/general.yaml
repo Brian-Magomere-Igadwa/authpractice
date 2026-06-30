@@ -92,15 +92,15 @@ jobs:
   coverage:
     name: Code coverage
     runs-on: ubuntu-latest
-    # 1. Launch PostgreSQL as a background service attached to this job
+
+    # Define the Postgres database using your existing Secrets here!
     services:
       postgres:
-        image: postgres:15 # Or whichever version your script uses
+        image: postgres:15
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: my_database
-        # Wait until postgres is healthy before starting the job steps
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -117,31 +117,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # Stripped 'sudo' out here since we are inside a container
       - name: Install psql client
         run: |
           apt-get update
           apt-get install -y postgresql-client
 
-      # Install the sqlx-cli for migrations
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features postgres
 
-      # 2. SKIP init_db.sh (since GitHub already started Postgres) and run migrations
+      # We SKIP init_db.sh because GitHub spun up the database securely above.
+      # We just map the DATABASE_URL dynamically using your secrets, swapping the host
       - name: Run Migrations
         env:
-          # Note: In GitHub Actions containers, services are accessible via their service name as the hostname
-          DATABASE_URL: postgres://postgres:password@postgres:5432/my_database
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           sqlx database create
           sqlx migrate run
 
       - name: Generate code coverage
         env:
-          DATABASE_URL: postgres://postgres:password@postgres:5432/my_database
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: my_database
-          POSTGRES_HOST: postgres
-          POSTGRES_PORT: 5432
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
         run: |
           cargo tarpaulin --verbose --workspace
