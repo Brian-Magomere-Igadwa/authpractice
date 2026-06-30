@@ -40,6 +40,7 @@ sha1 = "0.11.0"
 rand = { version = "0.8", features = ["std_rng"] }
 metrics = "0.24.6"
 metrics-exporter-prometheus = "0.18.3"
+time = ">= 0.3, < 0.3.48"
 
 [dependencies.sqlx]
 version = "0.8.6"
