@@ -102,8 +102,8 @@ jobs:
           # Install postgresql-client so the script's `psql` check passes
       - name: Install psql client
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          apt-get update
+          apt-get install -y postgresql-client
 
       # Install the sqlx-cli for migrations
       - name: Install SQLx CLI
