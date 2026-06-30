@@ -78,16 +78,23 @@ impl UserPassword {
 
         // Parse the body line-by-line to find our suffix
         // The API returns lines formatted as: SUFFIX:COUNT (e.g., "0018A45C3511E589421A2EC645D003474F2:3")
-        for line in body.lines() {
-            if let Some((returned_suffix, _count)) = line.split_once(':')
-                && returned_suffix == suffix
-            {
-                return Ok(true);
-            }
+        if let Some(value) = find_suffix(suffix, body) {
+            return value;
         }
 
         Ok(false)
     }
+}
+
+fn find_suffix(suffix: &str, body: String) -> Option<Result<bool, String>> {
+    for line in body.lines() {
+        if let Some((returned_suffix, _count)) = line.split_once(':')
+            && returned_suffix == suffix
+        {
+            return Some(Ok(true));
+        }
+    }
+    None
 }
 
 #[tracing::instrument(name = "Create user account", skip(password, pool))]
@@ -198,6 +205,43 @@ mod tests {
 
         // [Assert]
         assert_ok!(result);
+    }
+
+    //Test that find_suffix indeed works to prevent future regression after any updates later
+    #[test]
+    fn find_suffix_does_return_accurate_values() {
+        // Positive case: Suffix exists on the first line
+        let body_1 = String::from("expected_suffix:12\n");
+        assert_eq!(find_suffix("expected_suffix", body_1), Some(Ok(true)));
+
+        // Positive case: Suffix exists on a later line
+        let body_2 = String::from("wrong_suffix\nwrong_suffix3target_suffix:2");
+        assert_eq!(
+            find_suffix("wrong_suffix3target_suffix", body_2),
+            Some(Ok(true))
+        );
+    }
+
+    #[test]
+    fn find_suffix_returns_none_when_absent() {
+        // Negative case: Suffix is nowhere in the body
+        let body_missing = String::from("alpha:1\nbeta:2\ngamma:3");
+        assert_eq!(find_suffix("omega", body_missing), None);
+
+        // Negative case: Body is completely empty
+        let body_empty = String::from("");
+        assert_eq!(find_suffix("any_suffix", body_empty), None);
+    }
+
+    #[test]
+    fn find_suffix_handles_edge_cases() {
+        // Edge case: Suffix matches but line has no colon split
+        let body_no_colon = String::from("target_suffix");
+        assert_eq!(find_suffix("target_suffix", body_no_colon), None);
+
+        // Edge case: Suffix is part of the value side, not the key side
+        let body_value_match = String::from("some_key:target_suffix");
+        assert_eq!(find_suffix("target_suffix", body_value_match), None);
     }
 
     #[test]
