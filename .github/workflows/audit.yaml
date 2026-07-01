@@ -8,9 +8,9 @@ on:
       - "**/Cargo.lock"
 jobs:
   security_audit:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: taiki-e/install-action@cargo-deny
       - name: Scan for vulnerabilities
         run: cargo deny check advisories

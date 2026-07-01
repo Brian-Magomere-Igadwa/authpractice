@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 
+use anyhow::Context;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -15,6 +16,8 @@ pub struct FormData {
     name: String,
     password: String,
 }
+
+const POSTGRES_UNIQUE_VIOLATION: &str = "23505";
 
 impl User {
     /// Custom async constructor to bypass TryFrom's synchronous limitation
@@ -30,6 +33,8 @@ impl User {
 pub enum SignUpError {
     #[error("{0}")]
     ValidationError(String),
+    #[error("Username is already taken.")]
+    DuplicateUsername,
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
 }
@@ -44,8 +49,38 @@ impl ResponseError for SignUpError {
     fn status_code(&self) -> actix_web::http::StatusCode {
         match self {
             SignUpError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            SignUpError::DuplicateUsername => StatusCode::BAD_REQUEST,
             SignUpError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        match self {
+            SignUpError::UnexpectedError(_) => {
+                HttpResponse::build(self.status_code()).json(serde_json::json!({
+                    "error": "Internal server error",
+                    "message": "Something went wrong on our end."
+                }))
+            }
+            other => HttpResponse::build(other.status_code()).json(serde_json::json!({
+                "error": "Registration failed",
+                "message": other.to_string()
+            })),
+        }
+    }
+}
+
+impl SignUpError {
+    /// Helper to convert a generic database error into a semantic SignUpError
+    pub fn from_database_error(e: anyhow::Error) -> Self {
+        if let Some(sqlx::Error::Database(db_err)) =
+            e.source().and_then(|s| s.downcast_ref::<sqlx::Error>())
+            && db_err.code().as_deref() == Some(POSTGRES_UNIQUE_VIOLATION)
+        {
+            return SignUpError::DuplicateUsername;
+        }
+
+        SignUpError::UnexpectedError(e)
     }
 }
 
@@ -96,8 +131,17 @@ pub async fn create_user_account(
             Ok(HttpResponse::Created().finish())
         }
         Err(e) => {
-            metrics::counter!("auth_signup_total", "status" => "db_error").increment(1);
-            Err(SignUpError::UnexpectedError(e))
+            // Check if the underlying cause chain contains a Postgres Unique Constraint violation
+            let signup_err = SignUpError::from_database_error(e);
+
+            // Record dynamic metric names based on what the helper categorized it as
+            let metric_status = match &signup_err {
+                SignUpError::DuplicateUsername => "duplicate_username",
+                _ => "db_error",
+            };
+            metrics::counter!("auth_signup_total", "status" => metric_status).increment(1);
+
+            Err(signup_err)
         }
     };
 
@@ -136,4 +180,5 @@ pub async fn insert_user(pool: &PgPool, new_user: User) -> Result<(), anyhow::Er
         pool,
     )
     .await
+    .context("Failed to insert user into the database.")
 }

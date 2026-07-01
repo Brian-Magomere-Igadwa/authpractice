@@ -118,8 +118,8 @@ pub async fn create_credential(
         Utc::now()
     )
     .execute(pool)
-    .await
-    .context("Failed to create new credential in the database.")?;
+    .await?;
+
     Ok(())
 }
 
