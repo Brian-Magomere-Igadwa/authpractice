@@ -95,12 +95,12 @@ This project strictly adheres to **Test-Driven Development (TDD)** utilizing the
 
 ### Phase 1: Infrastructure & Health Diagnostics
 
-- [ ] Write a unit test for the system health check endpoint.
-- [ ] Implement a lightweight `GET /health_check` endpoint to verify initial application bootstrap and availability.
+- [X] Write a unit test for the system health check endpoint.
+- [X] Implement a lightweight `GET /health_check` endpoint to verify initial application bootstrap and availability.
 
 ### Phase 2: Core Authentication Modules
 
-- [ ] Implement secure User Sign-Up flow accompanied by strict validation unit tests.
+- [X] Implement secure User Sign-Up flow accompanied by strict validation unit tests.
 - [ ] Implement User Login flow with companion session verification unit tests.
 - [ ] Implement Profile Update (`PUT /user`) capabilities with isolated unit tests.
 - [ ] Implement Account **_Soft_** Deletion (`DELETE /user`) routines with companion unit tests.
