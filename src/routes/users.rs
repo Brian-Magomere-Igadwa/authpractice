@@ -7,7 +7,6 @@ use anyhow::Context;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-// use validator::validate_email;
 use crate::domain::{User, UserName, UserPassword, create_credential};
 use crate::startup::ApplicationBaseUrl;
 
