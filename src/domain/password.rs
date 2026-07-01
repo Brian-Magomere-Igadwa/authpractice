@@ -141,7 +141,6 @@ mod tests {
     use argon2::PasswordHash;
     // Make sure we pull UserPassword into scope from above
     use argon2::PasswordVerifier;
-    use claim::{assert_err, assert_ok};
 
     const LIVE_HIBP_URL: &str = "https://api.pwnedpasswords.com";
 
@@ -155,7 +154,10 @@ mod tests {
         let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert] Check the final Result cleanly
-        assert_err!(result);
+        assert!(
+            result.is_err(),
+            "Expected Err, but execution successfully returned Ok"
+        );
     }
 
     #[tokio::test]
@@ -167,7 +169,10 @@ mod tests {
         let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
-        assert_err!(result);
+        assert!(
+            result.is_err(),
+            "Expected Err, but execution successfully returned Ok"
+        );
     }
 
     #[tokio::test]
@@ -179,7 +184,10 @@ mod tests {
         let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
-        assert_err!(result);
+        assert!(
+            result.is_err(),
+            "Expected Err, but execution successfully returned Ok"
+        );
     }
 
     // Valids
@@ -192,7 +200,7 @@ mod tests {
         let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
-        assert_ok!(result);
+        assert!(result.is_ok(), "Expected Ok, got Err: {:?}", result.err());
     }
 
     #[tokio::test]
@@ -204,7 +212,7 @@ mod tests {
         let result = UserPassword::parse(pass, LIVE_HIBP_URL).await;
 
         // [Assert]
-        assert_ok!(result);
+        assert!(result.is_ok(), "Expected Ok, got Err: {:?}", result.err());
     }
 
     //Test that find_suffix indeed works to prevent future regression after any updates later
@@ -255,7 +263,9 @@ mod tests {
 
         // Assert
         // 1. Claim ensures the result is an Ok variant and unwraps it
-        let hashed_secret = assert_ok!(result);
+        let Ok(hashed_secret) = result else {
+            panic!("Expected Ok, got Err: {:?}", result.err());
+        };
 
         // Expose the secret inside the test boundary to verify it
         let hash_string = hashed_secret.expose_secret();
@@ -275,7 +285,11 @@ mod tests {
         let verification_result =
             argon2.verify_password(password_plaintext.as_bytes(), &parsed_hash);
 
-        assert_ok!(verification_result);
+        assert!(
+            verification_result.is_ok(),
+            "Password verification failed: {:?}",
+            verification_result.err()
+        );
     }
 
     #[test]
@@ -284,10 +298,16 @@ mod tests {
         let password = Secret::new("same_password".to_string());
 
         // Act
-        let hash_one = assert_ok!(compute_password_hash(password.clone()));
-        let hash_two = assert_ok!(compute_password_hash(password));
+        let result_one = compute_password_hash(password.clone());
+        let result_two = compute_password_hash(password);
 
         // Assert
+        let Ok(hash_one) = result_one else {
+            panic!("Expected Ok for hash_one, got Err: {:?}", result_one.err());
+        };
+        let Ok(hash_two) = result_two else {
+            panic!("Expected Ok for hash_two, got Err: {:?}", result_two.err());
+        };
         // Because of rand::thread_rng(), two back-to-back hashes must never be identical
         assert_ne!(
             hash_one.expose_secret(),
