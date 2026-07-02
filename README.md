@@ -37,7 +37,7 @@ sequenceDiagram
     else Validation Fails
         API-->>User: 400 Bad Request (Try Again)
     else Success
-        API->>PG: Save User (Name, Password, DOB, Country)
+        API->>PG: Save User (Name, Password)
         PG-->>API: 201 Created
         API-->>User: 201 Created / Route to Login Screen
     end
