@@ -267,6 +267,22 @@ async fn create_user_account_persists_the_new_user() {
 }
 
 // confirm fails if there are db errors
-//signin
+/// signin
+#[tokio::test]
+async fn login_returns_200() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Act
+    let response: Response = app.login();
+    // Assert
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "The API failed to accept the login request. Response body: {:?}",
+        response.text().await
+    );
+}
+
 //delete
 //patch
