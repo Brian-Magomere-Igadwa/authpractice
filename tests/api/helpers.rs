@@ -1,5 +1,5 @@
 use authpractice::configuration::{DatabaseSettings, get_configuration};
-use authpractice::end_points::{HEALTH_CHECK, USERS};
+use authpractice::end_points::{AUTH, HEALTH_CHECK, USERS};
 use authpractice::startup::run;
 use authpractice::telemetry::{get_subscriber, init_subscriber};
 use once_cell::sync::Lazy;
@@ -53,6 +53,18 @@ impl TestApp {
     {
         self.api_client
             .post(&format!("{}{}", &self.address, USERS))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn login<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(&format!("{}{}", &self.address, AUTH))
             .json(body)
             .send()
             .await
