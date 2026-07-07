@@ -7,8 +7,8 @@ use sqlx::PgPool;
 use tracing_actix_web::TracingLogger;
 
 use crate::{
-    end_points::{HEALTH_CHECK, USERS},
-    routes::{create_user_account, health_check},
+    end_points::{AUTH, HEALTH_CHECK, METRICS, USERS},
+    routes::{create_user_account, health_check, login},
 };
 
 pub struct ApplicationBaseUrl(pub String);
@@ -60,7 +60,8 @@ pub fn run(
             .wrap(TracingLogger::default())
             .route(HEALTH_CHECK, web::get().to(health_check))
             .route(USERS, web::post().to(create_user_account))
-            .route("/metrics", web::get().to(metrics_endpoint))
+            .route(AUTH, web::post().to(login))
+            .route(METRICS, web::get().to(metrics_endpoint))
             // Register the connection as part of the application state
             // Get a pointer copy and attach it to the application state
             .app_data(connection.clone())
