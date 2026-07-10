@@ -46,6 +46,15 @@ services:
     ports:
       - "5432:5432"
     command: ["postgres", "-N", "1000"]
+    volumes:
+      - ./monitoring/postgres-data:/var/lib/postgresql/data
+  redis:
+    image: redis:7-alpine
+    container_name: redis_test_store
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./monitoring/redis-data:/data
 
   prometheus:
     image: prom/prometheus:latest
