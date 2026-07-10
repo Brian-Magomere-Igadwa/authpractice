@@ -288,5 +288,84 @@ async fn login_returns_200() {
     );
 }
 
+#[tokio::test]
+async fn session_persisted_on_login() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Act
+    let response = app.test_user.login(&app).await;
+    // Extract cookie value to know what key to search for in Redis
+    // 1. Extract and clean the cookie value
+    let cookie_header = response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    // Parse out just the session token value (assumes cookie name is "id")
+    let cookie_value = cookie_header
+        .split(';')
+        .next()
+        .unwrap()
+        .strip_prefix("id=")
+        .expect("Cookie did not start with 'id='");
+
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "The API failed to accept the login request. Response body: {:?}",
+        response.text().await
+    );
+
+    // grab the session from redis with get_user_id (given the redis url maybe query I dont know)
+    // Connect directly to Redis to inspect side-effects
+    // 2. Connect directly to Redis to inspect side-effects
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_tokio_connection()
+        .await
+        .unwrap();
+
+    // The key format actix-session uses under the hood:
+    let redis_key = format!("session:{}", cookie_value);
+
+    // Actix-session stores data as a JSON string map inside Redis
+    let redis_data = redis::cmd("GET")
+        .arg(&redis_key)
+        .query_async(&mut con)
+        .await
+        .expect("Failed to fetch session key from Redis. The session might not have persisted.");
+
+    // Parse the JSON string to inspect your `TypedSession` state
+    // actix-session maps keys to strings under the hood
+    let session_state: HashMap<String, String> =
+        serde_json::from_str(&redis_data).expect("Failed to deserialize Redis session JSON");
+
+    // Grab the user_id out of the state map (use whatever string key your TypedSession uses)
+    let session_user_id_str = session_state
+        .get("user_id")
+        .expect("user_id not found in session state");
+
+    // 3. Grab the user id from Postgres for the username used to log in
+    let db_user = sqlx::query!(
+        r#"
+        SELECT user_id FROM users WHERE user_name = $1
+        "#,
+        app.test_user.username
+    )
+    .fetch_one(&app.db_pool)
+    .await
+    .expect("Failed to fetch user from Postgres");
+
+    // 4. Assert that the two are equal
+    // Asset that the two are equal which confirms that a new session does indeed get persisted on login
+    assert_eq!(
+        session_user_id_str,
+        &db_user.user_id.to_string(),
+        "The user_id stored in Redis session does not match the Postgres user ID!"
+    );
+}
 //delete
 //patch
