@@ -329,7 +329,7 @@ async fn session_persisted_on_login() {
     let redis_key = format!("session:{}", cookie_value);
 
     // Actix-session stores data as a JSON string map inside Redis
-    let redis_data = redis::cmd("GET")
+    let redis_data: String = redis::cmd("GET")
         .arg(&redis_key)
         .query_async(&mut con)
         .await
