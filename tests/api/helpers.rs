@@ -5,7 +5,7 @@ use authpractice::end_points::{AUTH, HEALTH_CHECK, USERS};
 use authpractice::startup::{Application, get_connection_pool};
 use authpractice::telemetry::{get_subscriber, init_subscriber};
 use chrono::Utc;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, Secret};
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::env;
 use std::sync::LazyLock;
@@ -129,18 +129,24 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
     // We retrieve the port assigned to us by the OS
     // let port = listener.local_addr().unwrap().port();
 
-    let mut configuration = get_configuration().expect("Failed to read configuration.");
-    configuration.database.database_name = Uuid::new_v4().to_string();
-    // This is entirely isolated to this test thread execution context.
-    // Read the enum target to decide where to route the application configuration!
-    match hibp_target {
-        HibpTarget::Mock => {
-            configuration.application.hibp_api_url = mock_hibp_server.uri();
+    let configuration = {
+        let mut c = get_configuration().expect("Failed to read configuration.");
+        // Use a different database for each test case
+        c.database.database_name = Uuid::new_v4().to_string();
+        // Use a random OS port
+        c.application.port = 0;
+        // This is entirely isolated to this test thread execution context.
+        // Read the enum target to decide where to route the application configuration!
+        match hibp_target {
+            HibpTarget::Mock => {
+                c.application.hibp_api_url = mock_hibp_server.uri();
+            }
+            HibpTarget::LiveProduction => {
+                c.application.hibp_api_url = "https://api.pwnedpasswords.com".to_string();
+            }
         }
-        HibpTarget::LiveProduction => {
-            configuration.application.hibp_api_url = "https://api.pwnedpasswords.com".to_string();
-        }
-    }
+        c
+    };
 
     // Create and migrate the database
     configure_database(&configuration.database).await;
@@ -177,7 +183,14 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
-    let mut connection = PgConnection::connect_with(&config.connect_options())
+    // Create database
+    let maintenance_settings = DatabaseSettings {
+        database_name: "postgres".to_string(),
+        username: "postgres".to_string(),
+        password: Secret::new("password".to_string()),
+        ..config.clone()
+    };
+    let mut connection = PgConnection::connect_with(&maintenance_settings.connect_options())
         .await
         .expect("Failed to connect to Postgres");
     connection
