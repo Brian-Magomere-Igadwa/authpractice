@@ -255,13 +255,25 @@ async fn create_user_account_persists_the_new_user() {
     });
 
     // Act
-    app.post_signup(&signup_body).await;
+    let response = app.post_signup(&signup_body).await;
 
     // Assert
-    let saved = sqlx::query!("SELECT user_name FROM users",)
-        .fetch_one(&app.db_pool)
-        .await
-        .expect("Failed to fetch saved user");
+    assert_eq!(
+        response.status().as_u16(),
+        201,
+        "Something failed when signing up the user. Details : {:?}",
+        response.text().await
+    );
+
+    let saved = sqlx::query!(
+        r#"
+        SELECT user_name FROM users WHERE user_name = $1
+        "#,
+        name
+    )
+    .fetch_one(&app.db_pool)
+    .await
+    .expect("User not found in postgress.");
 
     assert_eq!(saved.user_name, name);
 }
