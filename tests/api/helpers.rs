@@ -186,7 +186,7 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
         password: Secret::new("password".to_string()),
         ..config.clone()
     };
-    let mut connection = PgConnection::connect_with(&maintenance_settings.connect_options())
+    let mut connection = PgConnection::connect_with(&config.connect_options())
         .await
         .expect("Failed to connect to Postgres");
     connection
