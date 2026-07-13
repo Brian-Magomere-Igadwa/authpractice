@@ -89,17 +89,24 @@ async fn metrics_endpoint(db_pool: web::Data<PgPool>) -> impl Responder {
     }
 }
 
-pub fn run(
+async fn run(
     listener: TcpListener,
     db_pool: PgPool,
     hibp_api_url: String,
+    hmac_secret: Secret<String>,
     redis_uri: Secret<String>,
-) -> Result<Server, std::io::Error> {
+) -> Result<Server, anyhow::Error> {
     // Wrap the pool using web::Data, which boils down to an Arc smart pointer
     let connection = web::Data::new(db_pool);
     let base_url = web::Data::new(ApplicationBaseUrl(hibp_api_url));
+    let redis_store = RedisSessionStore::new(redis_uri.expose_secret()).await?;
+    let secret_key = Key::from(hmac_secret.expose_secret().as_bytes());
     let server = HttpServer::new(move || {
         App::new()
+            .wrap(SessionMiddleware::new(
+                redis_store.clone(),
+                secret_key.clone(),
+            ))
             .wrap(TracingLogger::default())
             .route(HEALTH_CHECK, web::get().to(health_check))
             .route(USERS, web::post().to(create_user_account))
