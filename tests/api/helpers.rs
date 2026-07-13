@@ -7,11 +7,12 @@ use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::env;
 use std::net::TcpListener;
+use std::sync::LazyLock;
 use uuid::Uuid;
 use wiremock::MockServer;
 
 // Ensure that the `tracing` stack is only initialised once using `once_cell`
-static TRACING: Lazy<()> = Lazy::new(|| {
+static TRACING: LazyLock<()> = LazyLock::new(|| {
     let default_filter_level = "info".to_string();
     let subscriber_name = "test".to_string();
     if std::env::var("TEST_LOG").is_ok() {
