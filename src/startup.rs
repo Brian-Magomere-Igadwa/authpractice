@@ -51,6 +51,7 @@ pub fn run(
     listener: TcpListener,
     db_pool: PgPool,
     hibp_api_url: String,
+    redis_uri: Secret<String>,
 ) -> Result<Server, std::io::Error> {
     // Wrap the pool using web::Data, which boils down to an Arc smart pointer
     let connection = web::Data::new(db_pool);
