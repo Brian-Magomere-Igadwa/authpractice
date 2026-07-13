@@ -226,7 +226,7 @@ impl TestUser {
 
     pub async fn login(&self, app: &TestApp) -> reqwest::Response {
         app.post_login(&serde_json::json!({
-            "username": &self.username,
+            "name": &self.username,
             "password": &self.password
         }))
         .await
