@@ -320,8 +320,9 @@ async fn session_persisted_on_login() {
     // Connect directly to Redis to inspect side-effects
     // 2. Connect directly to Redis to inspect side-effects
     let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    // Explicitly let it create the asynchronous multiplexed connection
     let mut con = redis_client
-        .get_multiplexed_tokio_connection()
+        .get_multiplexed_async_connection()
         .await
         .unwrap();
 
