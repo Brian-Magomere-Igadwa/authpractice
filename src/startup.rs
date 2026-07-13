@@ -1,9 +1,10 @@
 use std::net::TcpListener;
 
-use actix_web::{App, HttpResponse, HttpServer, Responder, dev::Server, web};
+use actix_session::{SessionMiddleware, storage::RedisSessionStore};
+use actix_web::{App, HttpResponse, HttpServer, Responder, cookie::Key, dev::Server, web};
 
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use secrecy::Secret;
+use secrecy::{ExposeSecret, Secret};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tracing_actix_web::TracingLogger;
 
