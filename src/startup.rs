@@ -33,8 +33,10 @@ impl Application {
             listener,
             connection_pool,
             configuration.application.hibp_api_url,
+            configuration.application.hmac_secret,
             configuration.redis_uri,
-        )?;
+        )
+        .await?;
         Ok(Self { port, server })
     }
 
