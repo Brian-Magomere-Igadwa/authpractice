@@ -37,6 +37,8 @@ pub struct TestApp {
     pub db_pool: PgPool,
     pub api_client: reqwest::Client,
     pub hibp_server: MockServer,
+    pub test_user: TestUser,
+    pub redis_uri: String,
 }
 
 /// Determines the network routing target for the Have I Been Pwned (HIBP) API.
@@ -126,9 +128,9 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
     // our own sign up, so this is a much less stressful way that avoids all that.
     // Instruct the Mock to mimic HIBP's range API and hold connections for 250ms
     // Changed "127.0.0.1:0" to "0.0.0.0:0" to allow the ephemeral k6 container to fbe able to call the api in ci.
-    let listener = TcpListener::bind("0.0.0.0:0").expect("Failed to bind random port");
+    // let listener = TcpListener::bind("0.0.0.0:0").expect("Failed to bind random port");
     // We retrieve the port assigned to us by the OS
-    let port = listener.local_addr().unwrap().port();
+    // let port = listener.local_addr().unwrap().port();
 
     let mut configuration = get_configuration().expect("Failed to read configuration.");
     configuration.database.database_name = Uuid::new_v4().to_string();
@@ -143,17 +145,19 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         }
     }
 
-    let connection_pool = configure_database(&configuration.database).await;
-    let server = run(
-        listener,
-        connection_pool.clone(),
-        configuration.application.hibp_api_url.clone(),
-    )
-    .expect("Failed to bind address");
-    let _ = tokio::spawn(server);
+    // Create and migrate the database
+    configure_database(&configuration.database).await;
+
+    // Launch the application as a background task
+    let application = Application::build(configuration.clone())
+        .await
+        .expect("Failed to build application.");
+
+    let application_port = application.port();
+    let _ = tokio::spawn(application.run_until_stopped());
 
     // We return the application address to the caller!
-    let address = format!("http://127.0.0.1:{}", port);
+    let address = format!("http://127.0.0.1:{}", application_port);
 
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -161,13 +165,18 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         .build()
         .unwrap();
 
-    TestApp {
+    let test_app = TestApp {
         address,
-        db_pool: connection_pool,
+        db_pool: get_connection_pool(&configuration.database),
         api_client: client,
         hibp_server: mock_hibp_server,
         current_port: port,
-    }
+        test_user: TestUser::generate(),
+        redis_uri: configuration.redis_uri.expose_secret().clone(),
+    };
+    test_app.test_user.store(&test_app.db_pool).await;
+
+    test_app
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
@@ -181,7 +190,6 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
     let mut connection = PgConnection::connect_with(&maintenance_settings.connect_options())
         .await
         .expect("Failed to connect to Postgres");
-
     connection
         .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
         .await

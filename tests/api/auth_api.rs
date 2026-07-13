@@ -271,14 +271,11 @@ async fn create_user_account_persists_the_new_user() {
 #[tokio::test]
 async fn login_returns_200() {
     // Arrange
-    let login_body = serde_json::json!({
-        "name": "random-tom-username",
-        "password": "()^%$£**£>?-random-password"
-    });
     let app = spawn_app(HibpTarget::LiveProduction).await;
 
     // Act
-    let response = app.login(&login_body).await;
+    let response = app.test_user.login(&app).await;
+
     // Assert
     assert_eq!(
         response.status().as_u16(),
