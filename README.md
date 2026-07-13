@@ -11,8 +11,7 @@ The system relies on a dual-layer storage strategy—utilizing **Postgres** for 
 | **POST** `/users` | [Stress Test](./load_tests/benchmarks/signup_stress_90vu_break.json)         | 90 VUs             | 236 req/s         | 749ms         | **Fails Threshold**      |
 
 Check out more about the [benchmarks](./load_tests/benchmarks/)
-
-
+Disclaimer: These benchmarks were executed on a local development machine under real-world conditions with significant background process overhead (CPU/memory contention). In an isolated, production-grade, or "noiseless" environment, latency figures and throughput thresholds for Actix Web are expected to be significantly lower and higher, respectively.
 
 ---
 
@@ -95,12 +94,12 @@ This project strictly adheres to **Test-Driven Development (TDD)** utilizing the
 
 ### Phase 1: Infrastructure & Health Diagnostics
 
-- [X] Write a unit test for the system health check endpoint.
-- [X] Implement a lightweight `GET /health_check` endpoint to verify initial application bootstrap and availability.
+- [x] Write a unit test for the system health check endpoint.
+- [x] Implement a lightweight `GET /health_check` endpoint to verify initial application bootstrap and availability.
 
 ### Phase 2: Core Authentication Modules
 
-- [X] Implement secure User Sign-Up flow accompanied by strict validation unit tests.
+- [x] Implement secure User Sign-Up flow accompanied by strict validation unit tests.
 - [ ] Implement User Login flow with companion session verification unit tests.
 - [ ] Implement Profile Update (`PUT /user`) capabilities with isolated unit tests.
 - [ ] Implement Account **_Soft_** Deletion (`DELETE /user`) routines with companion unit tests.
@@ -145,8 +144,6 @@ docker compose up -d
 sqlx migrate run
 ```
 
-
-
 > **Important:** Always ensure `docker compose up -d` has finished initializing the Postgres cluster completely before executing `sqlx migrate run` on your host machine.
 
 ---
@@ -187,7 +184,7 @@ Once your environment is up, you can monitor system behavior, log traces, and ru
 | **cAdvisor**      | [http://localhost:8080](https://www.google.com/search?q=http://localhost:8080) | _None_              | Real-time Container Resource Stats |
 | **Node Exporter** | [http://localhost:9100](https://www.google.com/search?q=http://localhost:9100) | _None_              | Host Machine Hardware Diagnostics  |
 
-###  Tracking Errors in Grafana Explore
+### Tracking Errors in Grafana Explore
 
 1. Navigate to **Grafana Explore** (`http://localhost:3000/explore`).
 2. Select the **Loki** data source.
@@ -200,5 +197,3 @@ Once your environment is up, you can monitor system behavior, log traces, and ru
 
 4. Expand any specific failing log line inside the dashboard drawer to locate its unique transaction **`request_id`** (e.g., `76b9875a-b690-4f14-a8a4-33bde98bd685`).
 5. Isolate that ID using `|= "YOUR_REQUEST_ID"` to reconstruct the chronological timeline of exactly what that thread did across your framework spans!
-
-
