@@ -7,6 +7,7 @@ pub struct Settings {
     // since we are using the type DbSettings, it's a good idea to impl Deserialize as we have on Settings with the macro
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
+    pub redis_uri: Secret<String>,
 }
 
 #[derive(serde::Deserialize, Clone)]
