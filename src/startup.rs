@@ -47,9 +47,7 @@ impl Application {
 }
 
 pub fn get_connection_pool(configuration: &DatabaseSettings) -> PgPool {
-    PgPoolOptions::new().connect_lazy_with(
-        configuration.connect_options()
-    )
+    PgPoolOptions::new().connect_lazy_with(configuration.connect_options())
 }
 
 pub struct ApplicationBaseUrl(pub String);
