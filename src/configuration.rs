@@ -28,6 +28,7 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
     pub hibp_api_url: String,
+    pub hmac_secret: Secret<String>,
 }
 
 impl DatabaseSettings {
