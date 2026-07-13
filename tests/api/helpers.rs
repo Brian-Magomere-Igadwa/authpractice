@@ -117,7 +117,7 @@ pub fn get_docker_accessible_url(local_port: u16) -> String {
 /// let app = spawn_app(HibpTarget::LiveProduction).await;
 /// ```
 pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
-    Lazy::force(&TRACING);
+    LazyLock::force(&TRACING);
 
     // Launch the mock HIBP server first on a random local port
     let mock_hibp_server = MockServer::start().await;
