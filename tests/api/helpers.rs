@@ -1,4 +1,3 @@
-use actix_web::HttpResponse;
 use argon2::password_hash::SaltString;
 use argon2::{Algorithm, Argon2, Params, PasswordHasher, Version};
 use authpractice::configuration::{DatabaseSettings, get_configuration};
@@ -9,7 +8,6 @@ use chrono::Utc;
 use secrecy::ExposeSecret;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::env;
-use std::net::TcpListener;
 use std::sync::LazyLock;
 use uuid::Uuid;
 use wiremock::MockServer;
@@ -169,7 +167,7 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         db_pool: get_connection_pool(&configuration.database),
         api_client: client,
         hibp_server: mock_hibp_server,
-        current_port: port,
+        current_port: application_port,
         test_user: TestUser::generate(),
         redis_uri: configuration.redis_uri.expose_secret().clone(),
     };
@@ -179,13 +177,6 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
-    // Create database
-    let maintenance_settings = DatabaseSettings {
-        database_name: "postgres".to_string(),
-        username: "postgres".to_string(),
-        password: Secret::new("password".to_string()),
-        ..config.clone()
-    };
     let mut connection = PgConnection::connect_with(&config.connect_options())
         .await
         .expect("Failed to connect to Postgres");
