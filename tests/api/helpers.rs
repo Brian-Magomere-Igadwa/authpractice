@@ -1,9 +1,13 @@
+use actix_web::HttpResponse;
+use argon2::password_hash::SaltString;
+use argon2::{Algorithm, Argon2, Params, PasswordHasher, Version};
 use authpractice::configuration::{DatabaseSettings, get_configuration};
 use authpractice::end_points::{AUTH, HEALTH_CHECK, USERS};
-use authpractice::startup::run;
+use authpractice::startup::{Application, get_connection_pool, run};
 use authpractice::telemetry::{get_subscriber, init_subscriber};
+use chrono::Utc;
 use once_cell::sync::Lazy;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, Secret};
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::env;
 use std::net::TcpListener;
@@ -192,4 +196,52 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .await
         .expect("Failed to migrate the database");
     connection_pool
+}
+
+pub struct TestUser {
+    user_id: Uuid,
+    pub username: String,
+    pub password: String,
+}
+
+impl TestUser {
+    pub fn generate() -> Self {
+        Self {
+            user_id: Uuid::new_v4(),
+            username: Uuid::new_v4().to_string(),
+            password: Uuid::new_v4().to_string(),
+        }
+    }
+
+    pub async fn login(&self, app: &TestApp) -> reqwest::Response {
+        app.post_login(&serde_json::json!({
+            "username": &self.username,
+            "password": &self.password
+        }))
+        .await
+    }
+
+    async fn store(&self, pool: &PgPool) {
+        let salt = SaltString::generate(&mut rand::thread_rng());
+        // Match production parameters
+        let password_hash = Argon2::new(
+            Algorithm::Argon2id,
+            Version::V0x13,
+            Params::new(15000, 2, 1, None).unwrap(),
+        )
+        .hash_password(self.password.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+        sqlx::query!(
+            "INSERT INTO users (user_id, user_name, password_hash, signed_up_at)
+            VALUES ($1, $2, $3, $4)",
+            self.user_id,
+            self.username,
+            password_hash,
+            Utc::now()
+        )
+        .execute(pool)
+        .await
+        .expect("Failed to store test user.");
+    }
 }
