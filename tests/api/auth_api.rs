@@ -460,3 +460,54 @@ async fn user_in_quarantine_continually_gets_429() {
     );
 }
 
+// Write a red test to confirm that indeed after quarantine time passes the user who was under quarantine can now login getting back 200.
+#[tokio::test]
+async fn user_can_login_successfully_after_quarantine_expires() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Clean slate
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+
+    let _: () = redis::cmd("FLUSHDB")
+        .query_async(&mut con)
+        .await
+        .expect("Failed to flush test Redis database");
+
+    // Act: Put the user into quarantine
+    let mut triggered_429 = false;
+    for _ in 0..10 {
+        let response = app.test_user.login(&app).await;
+        if response.status().as_u16() == 429 {
+            triggered_429 = true;
+            break;
+        }
+    }
+
+    assert!(
+        triggered_429,
+        "Failed to initiate rate-limiting state for the test."
+    );
+
+    // Wait out the quarantine period.
+    // Adjust the sleep duration according to your app's test-configuration rate-limiting settings.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Act: Attempt to login after quarantine expires
+    let recovery_response = app.test_user.login(&app).await;
+
+    // This will turn red if the user remains permanently blocked or if the expiration doesn't trigger
+    assert_eq!(
+        recovery_response.status().as_u16(),
+        200,
+        "User failed to log in with 200 OK after the quarantine window expired."
+    );
+}
+
+//delete
+//patch
+
