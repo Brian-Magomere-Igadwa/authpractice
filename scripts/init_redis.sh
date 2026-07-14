@@ -13,8 +13,10 @@ fi
 # Launch Redis using Docker
 docker run \
 	-p "6379:6379" \
+	-p "8001:8001" \
 	-d \
-	--name "redis_$(date '+%s')" \
-	redis:7
+	--name "redis_stack_$(date '+%s')" \
+	redis/redis-stack:latest
 
->&2 echo "Redis is ready to go!"
+>&2 echo "Redis Stack is ready!"
+>&2 echo "Dashboard available at: http://localhost:8001"
