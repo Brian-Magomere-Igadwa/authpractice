@@ -8,4 +8,4 @@ database:
   username: "postgres"
   password: "password"
   database_name: "authpracticedb"
-redis_uri: "http://127.0.0.1:6379"
+redis_uri: "redis://127.0.0.1:6379"
