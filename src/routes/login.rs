@@ -70,10 +70,10 @@ pub async fn login(
     // if they match then we create a session for them else invalid creds
 
     let credentials = Credentials {
-        username: UserName::parse(form.0.name).map_err(|e| LoginError::ValidationError(e))?,
+        username: UserName::parse(form.0.name).map_err(LoginError::ValidationError)?,
         password: UserPassword::parse(form.0.password, &hibp_url.0)
             .await
-            .map_err(|e| LoginError::ValidationError(e))?,
+            .map_err(LoginError::ValidationError)?,
     };
 
     tracing::Span::current().record(
