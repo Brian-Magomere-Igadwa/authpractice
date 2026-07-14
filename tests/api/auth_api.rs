@@ -415,3 +415,48 @@ async fn login_attempts_exceeding_threshold_returns_429() {
         "The application did not return a 429 status code after multiple login attempts."
     );
 }
+
+// Write a red test to confirm that indeed if a user is put under quarantine for multiple login attempts that they will keep getting 429.
+#[tokio::test]
+async fn user_in_quarantine_continually_gets_429() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Clean slate
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+
+    let _: () = redis::cmd("FLUSHDB")
+        .query_async(&mut con)
+        .await
+        .expect("Failed to flush test Redis database");
+
+    // Act: Fire off enough requests to trigger quarantine (429)
+    let mut triggered_429 = false;
+    for _ in 0..10 {
+        let response = app.test_user.login(&app).await;
+        if response.status().as_u16() == 429 {
+            triggered_429 = true;
+            break;
+        }
+    }
+
+    assert!(
+        triggered_429,
+        "Failed to initiate rate-limiting state for the test."
+    );
+
+    // Act & Assert: Attempt to login *again* immediately while under quarantine
+    let subsequent_response = app.test_user.login(&app).await;
+
+    // This will turn red if your rate limiter does not enforce a quarantine/block window
+    assert_eq!(
+        subsequent_response.status().as_u16(),
+        429,
+        "The user was allowed to attempt login again during their quarantine window."
+    );
+}
+
