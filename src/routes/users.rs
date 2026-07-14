@@ -12,8 +12,8 @@ use crate::startup::ApplicationBaseUrl;
 
 #[derive(serde::Deserialize)]
 pub struct FormData {
-    name: String,
-    password: String,
+    pub name: String,
+    pub password: String,
 }
 
 const POSTGRES_UNIQUE_VIOLATION: &str = "23505";
