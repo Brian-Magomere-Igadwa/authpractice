@@ -377,5 +377,41 @@ async fn session_persisted_on_login() {
     );
 }
 
-//delete
-//patch
+// Write a red test that confirms that indeed multiple login attempts of the same user that exceed our threshold lead to 429 with error try again later from a subsequent login attempt atop the threshold.
+#[tokio::test]
+async fn login_attempts_exceeding_threshold_returns_429() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Connect to Redis and flush it to ensure rate-limiting state is clean
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+
+    let _: () = redis::cmd("FLUSHDB")
+        .query_async(&mut con)
+        .await
+        .expect("Failed to flush test Redis database");
+
+    // Act & Assert
+    // Simulate multiple login attempts to exceed your application's threshold.
+    // Replace 10 with a number slightly higher than your planned rate-limit threshold.
+    let mut last_status = 200;
+    for _ in 0..10 {
+        let response = app.test_user.login(&app).await;
+        last_status = response.status().as_u16();
+
+        if last_status == 429 {
+            break;
+        }
+    }
+
+    // This should fail (turn red) if your app does not yet support rate limiting,
+    // as all attempts would return 200.
+    assert_eq!(
+        last_status, 429,
+        "The application did not return a 429 status code after multiple login attempts."
+    );
+}
