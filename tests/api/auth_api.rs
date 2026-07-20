@@ -450,25 +450,16 @@ async fn user_in_quarantine_continually_gets_429() {
         .await
         .expect("Failed to flush test Redis database");
 
-    // Act: Fire off enough requests to trigger quarantine (429)
-    let mut triggered_429 = false;
-    for _ in 0..10 {
-        let response = app.test_user.login(&app).await;
-        if response.status().as_u16() == 429 {
-            triggered_429 = true;
-            break;
-        }
+    let bad_user = app.test_user.clone_with_bad_password();
+
+    // Act: Exceed 3 failed attempts to trigger quarantine
+    for _ in 0..4 {
+        let _ = bad_user.login(&app).await;
     }
 
-    assert!(
-        triggered_429,
-        "Failed to initiate rate-limiting state for the test."
-    );
+    // Assert: Attempt to login again immediately while under quarantine
+    let subsequent_response = bad_user.login(&app).await;
 
-    // Act & Assert: Attempt to login *again* immediately while under quarantine
-    let subsequent_response = app.test_user.login(&app).await;
-
-    // This will turn red if your rate limiter does not enforce a quarantine/block window
     assert_eq!(
         subsequent_response.status().as_u16(),
         429,
