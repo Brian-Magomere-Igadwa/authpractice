@@ -5,3 +5,4 @@ Cargo.lock
 /monitoring/loki-data
 /monitoring/grafana-storage
 /monitoring/postgres-data
+/monitoring/redis-data
