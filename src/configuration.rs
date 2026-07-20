@@ -32,6 +32,8 @@ pub struct ApplicationSettings {
     // The duration (in seconds) a user remains quarantined after too many failed attempts
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub quarantine_duration_seconds: i64,
+    #[serde(default)] // Allows it to be blank or generated dynamically
+    pub redis_namespace: String,
 }
 
 impl DatabaseSettings {
