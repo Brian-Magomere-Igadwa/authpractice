@@ -380,10 +380,8 @@ async fn session_persisted_on_login() {
 // Write a red test that confirms that indeed multiple login attempts of the same user that exceed our threshold lead to 429 with error try again later from a subsequent login attempt atop the threshold.
 #[tokio::test]
 async fn login_attempts_exceeding_threshold_returns_429() {
-    // Arrange
     let app = spawn_app(HibpTarget::LiveProduction).await;
 
-    // Connect to Redis and flush it to ensure rate-limiting state is clean
     let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
     let mut con = redis_client
         .get_multiplexed_async_connection()
@@ -395,24 +393,42 @@ async fn login_attempts_exceeding_threshold_returns_429() {
         .await
         .expect("Failed to flush test Redis database");
 
-    // Act & Assert
-    // Simulate multiple login attempts to exceed your application's threshold.
-    // Replace 10 with a number slightly higher than your planned rate-limit threshold.
-    let mut last_status = 200;
-    for _ in 0..10 {
-        let response = app.test_user.login(&app).await;
-        last_status = response.status().as_u16();
+    let bad_user = app.test_user.clone_with_bad_password();
 
-        if last_status == 429 {
-            break;
-        }
+    // Act & Assert: Track failures up to 3 attempts
+    for attempt in 1..=3 {
+        let response = bad_user.login(&app).await;
+        assert_ne!(response.status().as_u16(), 429);
+
+        // Fetch your custom brute-force tracking key (not the actix session)
+        let rate_limit_key = format!("login_attempts:{}", app.test_user.username);
+        let state_json: String = redis::cmd("GET")
+            .arg(&rate_limit_key)
+            .query_async(&mut con)
+            .await
+            .expect("Failed to fetch login failure state");
+
+        // Validate structure matches the serialized `LoginTracker`
+        let state: serde_json::Value = serde_json::from_str(&state_json).unwrap();
+
+        assert_eq!(state["failures"].as_i64().unwrap(), attempt as i64);
+        assert_eq!(state["is_quarantined"].as_bool().unwrap(), false);
     }
 
-    // This should fail (turn red) if your app does not yet support rate limiting,
-    // as all attempts would return 200.
+    // 4th attempt exceeds threshold
+    let response = bad_user.login(&app).await;
+    let status = response.status().as_u16();
+    let body_text = response.text().await.unwrap_or_default();
+
     assert_eq!(
-        last_status, 429,
-        "The application did not return a 429 status code after multiple login attempts."
+        status, 429,
+        "Exceeding 3 failed attempts did not return 429. Response: {}",
+        body_text
+    );
+    assert!(
+        body_text.to_lowercase().contains("try again later"),
+        "The error response was expected to ask the user to 'try again later'. Found: '{}'",
+        body_text
     );
 }
 
