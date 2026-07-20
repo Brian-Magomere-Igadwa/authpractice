@@ -1,14 +1,159 @@
 use std::fmt::Debug;
 
 use actix_web::{HttpResponse, ResponseError, http::StatusCode, web};
+use chrono::{DateTime, Duration, Utc};
+use redis::{AsyncCommands, aio::MultiplexedConnection};
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 use crate::{
+    configuration::Settings,
     domain::{AuthError, Credentials, UserName, UserPassword, validate_credentials},
     routes::{FormData, error_chain_fmt},
     session_state::TypedSession,
     startup::ApplicationBaseUrl,
 };
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct LoginTracker {
+    pub failures: i32,
+    pub is_quarantined: bool,
+    pub quarantined_until: Option<DateTime<Utc>>,
+}
+
+impl LoginTracker {
+    /// Fetches the tracker state for a given username from Redis.
+    async fn fetch(con: &mut MultiplexedConnection, username: &str) -> Result<Self, LoginError> {
+        let tracker_key = format!("login_attempts:{}", username);
+        let tracker_json: Option<String> = con
+            .get(&tracker_key)
+            .await
+            .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+        match tracker_json {
+            Some(json) => Ok(serde_json::from_str(&json).unwrap_or_default()),
+            None => Ok(Self::default()),
+        }
+    }
+
+    /// Checks if the user is currently quarantined. Resets the tracker if the quarantine expired.
+    fn check_quarantine(&mut self) -> Result<(), LoginError> {
+        if self.is_quarantined
+            && let Some(until) = self.quarantined_until
+        {
+            if Utc::now() < until {
+                return Err(LoginError::TooManyRequests);
+            } else {
+                // Quarantine expired, reset tracking
+                *self = Self::default();
+            }
+        }
+        Ok(())
+    }
+
+    /// Increments failures, applies quarantine if limit exceeded, and saves state to Redis.
+    async fn register_failure(
+        &mut self,
+        con: &mut MultiplexedConnection,
+        username: &str,
+        quarantine_seconds: i64,
+    ) -> Result<(), LoginError> {
+        self.failures += 1;
+        if self.failures >= 3 {
+            self.is_quarantined = true;
+            self.quarantined_until = Some(Utc::now() + Duration::seconds(quarantine_seconds));
+        }
+
+        let tracker_key = format!("login_attempts:{}", username);
+        let serialized =
+            serde_json::to_string(&self).map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+        // Expire tracker entry after 1 day (86400 seconds)
+        let _: () = con
+            .set_ex(&tracker_key, serialized, 86400)
+            .await
+            .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+        Ok(())
+    }
+
+    /// Clears any tracking data from Redis upon successful authentication.
+    async fn clear(con: &mut MultiplexedConnection, username: &str) -> Result<(), LoginError> {
+        let tracker_key = format!("login_attempts:{}", username);
+        let _: () = con
+            .del(&tracker_key)
+            .await
+            .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+        Ok(())
+    }
+}
+
+// --- Handler ---
+
+pub async fn login(
+    form: web::Json<FormData>,
+    pool: web::Data<PgPool>,
+    session: TypedSession,
+    hibp_url: web::Data<ApplicationBaseUrl>,
+    settings: web::Data<Settings>,
+    redis_client: web::Data<redis::Client>,
+) -> Result<HttpResponse, LoginError> {
+    let username_str = &form.0.name;
+    let password = UserPassword::parse(form.0.password, &hibp_url.0)
+        .await
+        .map_err(LoginError::ValidationError)?;
+    let username = UserName::parse(username_str).map_err(LoginError::ValidationError)?;
+
+    tracing::Span::current().record("username", tracing::field::display(username_str));
+
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+    // 1. Rate limiting checks
+    let mut tracker = LoginTracker::fetch(&mut con, username_str).await?;
+    tracker.check_quarantine()?;
+
+    // 2. Authenticate
+    match validate_credentials(Credentials { username, password }, &pool).await {
+        Ok(user_id) => {
+            tracing::Span::current().record("user_id", tracing::field::display(&user_id));
+
+            LoginTracker::clear(&mut con, username_str).await?;
+
+            session.renew();
+            session
+                .insert_user_id(user_id)
+                .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+            Ok(HttpResponse::Ok().finish())
+        }
+        Err(auth_err) => {
+            if let AuthError::InvalidCredentials(_) = auth_err {
+                tracker
+                    .register_failure(
+                        &mut con,
+                        username_str,
+                        settings.application.quarantine_duration_seconds,
+                    )
+                    .await?;
+
+                if tracker.is_quarantined {
+                    return Err(LoginError::TooManyRequests);
+                }
+            }
+
+            let e = match auth_err {
+                AuthError::InvalidCredentials(_) => LoginError::AuthError(auth_err.into()),
+                AuthError::UnexpectedError(_) => LoginError::UnexpectedError(auth_err.into()),
+            };
+            Err(e)
+        }
+    }
+}
+
+// --- Errors ---
 
 #[derive(thiserror::Error)]
 pub enum LoginError {
