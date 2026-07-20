@@ -325,7 +325,7 @@ async fn session_persisted_on_login() {
         response.text().await
     );
 
-    // 2. Query Redis for the newly created key (it will be the only one now)
+    // 2. Query Redis for the newly created key (it will be the only one now because login clears the attempt keys)
     let keys: Vec<String> = redis::cmd("KEYS")
         .arg("*")
         .query_async(&mut con)
