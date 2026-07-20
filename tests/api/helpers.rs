@@ -227,6 +227,15 @@ impl TestUser {
         }
     }
 
+    /// Generates a copy of this user with an incorrect password to trigger failed login logic
+    pub fn clone_with_bad_password(&self) -> Self {
+        Self {
+            user_id: self.user_id,
+            username: self.username.clone(),
+            password: format!("{}-wrong-password", self.password),
+        }
+    }
+
     pub async fn login(&self, app: &TestApp) -> reqwest::Response {
         app.post_login(&serde_json::json!({
             "name": &self.username,
