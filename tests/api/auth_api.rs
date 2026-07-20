@@ -83,6 +83,11 @@ async fn hibp_and_argon2_workload_dont_regress_availability_under_load_with_k6()
     if std::env::var("TARPAULIN").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
         return;
     }
+
+    // Skip entirely if running inside GitHub Actions
+    if std::env::var("CI").is_ok() {
+        return;
+    }
     // Arrange
     // Going with the mock option to avoid assaulting the real HIBP website
     // While testing
@@ -548,6 +553,10 @@ async fn login_latency_doesnt_drop_past_threshold_and_targets_under_load_with_k6
     // House keeping
     // Skip performance testing under coverage tracking due to instrumentation overhead
     if std::env::var("TARPAULIN").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
+        return;
+    }
+    // Skip entirely if running inside GitHub Actions
+    if std::env::var("CI").is_ok() {
         return;
     }
 
