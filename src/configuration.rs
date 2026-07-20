@@ -29,6 +29,9 @@ pub struct ApplicationSettings {
     pub host: String,
     pub hibp_api_url: String,
     pub hmac_secret: Secret<String>,
+    // The duration (in seconds) a user remains quarantined after too many failed attempts
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub quarantine_duration_seconds: i64,
 }
 
 impl DatabaseSettings {

@@ -2,6 +2,7 @@ application:
   port: 8000
   hibp_api_url: "https://api.pwnedpasswords.com"
   hmac_secret: "super-long-and-secret-random-key-needed-to-verify-message-integrity"
+  quarantine_duration_seconds: 5
 database:
   host: "localhost"
   port: 5432
