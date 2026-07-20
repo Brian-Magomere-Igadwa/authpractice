@@ -16,6 +16,8 @@ pub enum LoginError {
     ValidationError(String),
     #[error("Authentication failed")]
     AuthError(#[source] anyhow::Error),
+    #[error("Too many requests. Please try again later.")]
+    TooManyRequests,
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
 }
