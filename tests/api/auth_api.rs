@@ -506,6 +506,46 @@ async fn user_can_login_successfully_after_quarantine_expires() {
     );
 }
 
+// Write a test to Check for the edge case that when I login are more than one sessions created for that user id, that way we are sure none indeed are.
+#[tokio::test]
+async fn login_creates_exactly_one_session_and_no_duplicates() {
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+
+    let _: () = redis::cmd("FLUSHDB")
+        .query_async(&mut con)
+        .await
+        .expect("Failed to flush test Redis database");
+
+    // Log in successfully
+    let response = app.test_user.login(&app).await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    // Query all keys in Redis
+    let keys: Vec<String> = redis::cmd("KEYS")
+        .arg("*")
+        .query_async(&mut con)
+        .await
+        .unwrap();
+
+    // Filter to isolate ONLY actix-session keys, ignoring our custom "login_attempts:*" tracker key
+    let session_keys: Vec<&String> = keys
+        .iter()
+        .filter(|key| !key.starts_with("login_attempts:"))
+        .collect();
+
+    assert_eq!(
+        session_keys.len(),
+        1,
+        "Expected exactly 1 session key to exist in Redis, but found: {:?}",
+        session_keys
+    );
+}
 //delete
 //patch
 
