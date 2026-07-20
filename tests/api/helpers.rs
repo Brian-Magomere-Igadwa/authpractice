@@ -137,6 +137,9 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         c.application.port = 0;
         // This is entirely isolated to this test thread execution context.
         // Read the enum target to decide where to route the application configuration!
+        // OVERRIDE FOR FAST TESTS:
+        // Force the quarantine duration to 2 seconds instead of the 1 hour production default
+        c.application.quarantine_duration_seconds = 2;
         match hibp_target {
             HibpTarget::Mock => {
                 c.application.hibp_api_url = mock_hibp_server.uri();
