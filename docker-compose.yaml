@@ -24,6 +24,8 @@ services:
         condition: service_started
       hibp-mock:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   hibp-mock:
     image: wiremock/wiremock:latest
@@ -56,6 +58,12 @@ services:
       - "6379:6379"
     volumes:
       - ./monitoring/redis-data:/data
+    # Add a healthcheck so the app knows when it's safe to connect
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
 
   prometheus:
     image: prom/prometheus:latest
