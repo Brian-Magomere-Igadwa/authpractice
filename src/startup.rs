@@ -92,7 +92,22 @@ async fn run(
     let settings_data = web::Data::new(config.clone());
     let base_url = web::Data::new(ApplicationBaseUrl(config.application.hibp_api_url));
 
-    let redis_store = RedisSessionStore::new(config.redis_uri.expose_secret()).await?;
+    // let redis_store = RedisSessionStore::new(config.redis_uri.expose_secret()).await?;
+    // 1. Configure the actix-session storage engine using the custom key prefix namespace.
+    // If the namespace is empty (production fallback), it preserves the default key structure.
+    let namespace = config.application.redis_namespace;
+    let session_store_builder = RedisSessionStore::builder(config.redis_uri.expose_secret());
+
+    let redis_store = if !namespace.is_empty() {
+        session_store_builder
+            // We append a trailing colon to separate our namespace from the session key UUIDs
+            // Intercept the generated session key and prepend your test UUID namespace
+            .cache_keygen(move |session_key| format!("{}:session:{}", namespace, session_key))
+            .build()
+            .await?
+    } else {
+        session_store_builder.build().await?
+    };
     let redis_client = redis::Client::open(config.redis_uri.expose_secret().as_str())?;
     let redis_data = web::Data::new(redis_client);
 
