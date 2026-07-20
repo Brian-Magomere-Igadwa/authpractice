@@ -29,14 +29,7 @@ impl Application {
         );
         let listener = TcpListener::bind(address)?;
         let port = listener.local_addr().unwrap().port();
-        let server = run(
-            listener,
-            connection_pool,
-            configuration.application.hibp_api_url,
-            configuration.application.hmac_secret,
-            configuration.redis_uri,
-        )
-        .await?;
+        let server = run(listener, connection_pool, configuration).await?;
         Ok(Self { port, server })
     }
 
@@ -92,9 +85,7 @@ async fn metrics_endpoint(db_pool: web::Data<PgPool>) -> impl Responder {
 async fn run(
     listener: TcpListener,
     db_pool: PgPool,
-    hibp_api_url: String,
-    hmac_secret: Secret<String>,
-    redis_uri: Secret<String>,
+    config: Settings,
 ) -> Result<Server, anyhow::Error> {
     // Wrap the pool using web::Data, which boils down to an Arc smart pointer
     let connection = web::Data::new(db_pool);
