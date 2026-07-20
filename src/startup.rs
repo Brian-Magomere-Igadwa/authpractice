@@ -4,7 +4,7 @@ use actix_session::{SessionMiddleware, storage::RedisSessionStore};
 use actix_web::{App, HttpResponse, HttpServer, Responder, cookie::Key, dev::Server, web};
 
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use secrecy::{ExposeSecret, Secret};
+use secrecy::ExposeSecret;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tracing_actix_web::TracingLogger;
 
@@ -89,9 +89,14 @@ async fn run(
 ) -> Result<Server, anyhow::Error> {
     // Wrap the pool using web::Data, which boils down to an Arc smart pointer
     let connection = web::Data::new(db_pool);
-    let base_url = web::Data::new(ApplicationBaseUrl(hibp_api_url));
-    let redis_store = RedisSessionStore::new(redis_uri.expose_secret()).await?;
-    let secret_key = Key::from(hmac_secret.expose_secret().as_bytes());
+    let settings_data = web::Data::new(config.clone());
+    let base_url = web::Data::new(ApplicationBaseUrl(config.application.hibp_api_url));
+
+    let redis_store = RedisSessionStore::new(config.redis_uri.expose_secret()).await?;
+    let redis_client = redis::Client::open(config.redis_uri.expose_secret().as_str())?;
+    let redis_data = web::Data::new(redis_client);
+
+    let secret_key = Key::from(config.application.hmac_secret.expose_secret().as_bytes());
     let server = HttpServer::new(move || {
         App::new()
             .wrap(SessionMiddleware::new(
@@ -107,6 +112,8 @@ async fn run(
             // Get a pointer copy and attach it to the application state
             .app_data(connection.clone())
             .app_data(base_url.clone())
+            .app_data(redis_data.clone())
+            .app_data(settings_data.clone())
     })
     .listen(listener)?
     .run();
