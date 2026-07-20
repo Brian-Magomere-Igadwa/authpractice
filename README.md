@@ -9,6 +9,7 @@ The system relies on a dual-layer storage strategy—utilizing **Postgres** for 
 | **POST** `/users` | [Load Test](./load_tests/benchmarks/signup_scenario_tests_summary.json)      | 50 VUs             | 170 req/s         | 415ms         | Pass (Release Profile)   |
 | **POST** `/users` | [Scale Peak](./load_tests/benchmarks/signup_scenario_66vu_peak_summary.json) | 66 VUs             | 221 req/s         | 450.0ms       | Pass (Maximum Safe Load) |
 | **POST** `/users` | [Stress Test](./load_tests/benchmarks/signup_stress_90vu_break.json)         | 90 VUs             | 236 req/s         | 749ms         | **Fails Threshold**      |
+| **POST** `/auth`  | [Load Test](./load_tests/benchmarks/login_scenario_tests_summary.json)       | 50 VUs             | 193 req/s         | 348ms         | **Pass**                 |
 
 Check out more about the [benchmarks](./load_tests/benchmarks/)
 Disclaimer: These benchmarks were executed on a local development machine under real-world conditions with significant background process overhead (CPU/memory contention). In an isolated, production-grade, or "noiseless" environment, latency figures and throughput thresholds for Actix Web are expected to be significantly lower and higher, respectively.
