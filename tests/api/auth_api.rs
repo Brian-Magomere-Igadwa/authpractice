@@ -418,17 +418,24 @@ async fn login_attempts_exceeding_threshold_returns_429() {
     // 4th attempt exceeds threshold
     let response = bad_user.login(&app).await;
     let status = response.status().as_u16();
-    let body_text = response.text().await.unwrap_or_default();
+    // 1. Parse the JSON body immediately (this consumes the response stream)
+    let body_json: serde_json::Value = response
+        .json()
+        .await
+        .expect("Failed to parse 429 response body as JSON");
 
+    // 2. Assert status code (include the structured JSON in the failure message if it drops)
     assert_eq!(
         status, 429,
-        "Exceeding 3 failed attempts did not return 429. Response: {}",
-        body_text
+        "Exceeding 3 failed attempts did not return 429. Payload: {:?}",
+        body_json
     );
-    assert!(
-        body_text.to_lowercase().contains("try again later"),
-        "The error response was expected to ask the user to 'try again later'. Found: '{}'",
-        body_text
+
+    // 3. Assert on the structured machine-readable error classification field
+    assert_eq!(
+        body_json["error"], "Too Many Requests",
+        "Unexpected error payload type classification. Found payload: {:?}",
+        body_json
     );
 }
 
