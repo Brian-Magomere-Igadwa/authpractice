@@ -18,6 +18,7 @@ services:
       - APP_DATABASE__HOST=postgres
       - APP_DATABASE__PORT=${POSTGRES_PORT}
       - APP_HIBP__API_URL=http://hibp-mock:8080
+      - APP_REDIS_URI=redis://redis:6379
     depends_on:
       postgres:
         condition: service_started
