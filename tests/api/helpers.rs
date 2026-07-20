@@ -36,6 +36,7 @@ pub struct TestApp {
     pub hibp_server: MockServer,
     pub test_user: TestUser,
     pub redis_uri: String,
+    pub redis_namespace: String,
 }
 
 /// Determines the network routing target for the Have I Been Pwned (HIBP) API.
@@ -129,10 +130,13 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
     // We retrieve the port assigned to us by the OS
     // let port = listener.local_addr().unwrap().port();
 
+    // Generate a single UUID prefix used for both Postgres and Redis isolation
+    let test_isolation_id = Uuid::new_v4().to_string();
+
     let configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
         // Use a different database for each test case
-        c.database.database_name = Uuid::new_v4().to_string();
+        c.database.database_name = test_isolation_id.clone();
         // Use a random OS port
         c.application.port = 0;
         // This is entirely isolated to this test thread execution context.
@@ -140,6 +144,10 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         // OVERRIDE FOR FAST TESTS:
         // Force the quarantine duration to 2 seconds instead of the 1 hour production default
         c.application.quarantine_duration_seconds = 2;
+
+        // Isolate Redis via Keyspace Namespacing
+        c.application.redis_namespace = test_isolation_id.clone();
+
         match hibp_target {
             HibpTarget::Mock => {
                 c.application.hibp_api_url = mock_hibp_server.uri();
@@ -179,6 +187,7 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         current_port: application_port,
         test_user: TestUser::generate(),
         redis_uri: configuration.redis_uri.expose_secret().clone(),
+        redis_namespace: test_isolation_id,
     };
     test_app.test_user.store(&test_app.db_pool).await;
 
