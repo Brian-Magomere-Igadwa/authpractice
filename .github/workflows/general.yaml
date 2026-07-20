@@ -56,6 +56,10 @@ jobs:
         run: |
           chmod +x ./scripts/init_db.sh
           ./scripts/init_db.sh
+      - name: Initialize Redis via Script
+        run: |
+          chmod +x ./scripts/init_redis.sh
+          ./scripts/init_redis.sh
       - name: Run Migrations
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
