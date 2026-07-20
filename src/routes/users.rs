@@ -21,7 +21,7 @@ const POSTGRES_UNIQUE_VIOLATION: &str = "23505";
 impl User {
     /// Custom async constructor to bypass TryFrom's synchronous limitation
     pub async fn try_from_form(value: FormData, hibp_base_url: &str) -> Result<Self, String> {
-        let name = UserName::parse(value.name)?;
+        let name = UserName::parse(&value.name)?;
         let password = UserPassword::parse(value.password, hibp_base_url).await?;
 
         Ok(Self { name, password })
