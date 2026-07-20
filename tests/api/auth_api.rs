@@ -309,12 +309,6 @@ async fn session_persisted_on_login() {
         .await
         .unwrap();
 
-    // 1. FLUSH REDIS to clear out stale sessions from previous test runs
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut con)
-        .await
-        .expect("Failed to flush test Redis database");
-
     // Act
     let response = app.test_user.login(&app).await;
 
@@ -325,20 +319,23 @@ async fn session_persisted_on_login() {
         response.text().await
     );
 
-    // 2. Query Redis for the newly created key (it will be the only one now because login clears the attempt keys)
+    // 2. Query Redis for the newly created key inside our unique namespace
+    let pattern = format!("{}:*", app.redis_namespace);
     let keys: Vec<String> = redis::cmd("KEYS")
-        .arg("*")
+        .arg(&pattern)
         .query_async(&mut con)
         .await
         .expect("Failed to execute KEYS command in Redis");
 
-    let redis_key = keys
-        .first()
+    // Filter down specifically to the actix-session key within this namespace
+    let session_key = keys
+        .iter()
+        .find(|key| key.contains(":session:"))
         .expect("No session keys found in Redis. The session was not persisted.");
 
     // Fetch the JSON string
     let redis_data: String = redis::cmd("GET")
-        .arg(redis_key)
+        .arg(session_key)
         .query_async(&mut con)
         .await
         .expect("Failed to fetch session key from Redis.");
@@ -377,7 +374,6 @@ async fn session_persisted_on_login() {
     );
 }
 
-// Write a red test that confirms that indeed multiple login attempts of the same user that exceed our threshold lead to 429 with error try again later from a subsequent login attempt atop the threshold.
 #[tokio::test]
 async fn login_attempts_exceeding_threshold_returns_429() {
     let app = spawn_app(HibpTarget::LiveProduction).await;
@@ -388,20 +384,18 @@ async fn login_attempts_exceeding_threshold_returns_429() {
         .await
         .unwrap();
 
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut con)
-        .await
-        .expect("Failed to flush test Redis database");
-
     let bad_user = app.test_user.clone_with_bad_password();
 
     // Act & Assert: Track failures up to 3 attempts
-    for attempt in 1..=3 {
+    for attempt in 1..=2 {
         let response = bad_user.login(&app).await;
         assert_ne!(response.status().as_u16(), 429);
 
-        // Fetch your custom brute-force tracking key (not the actix session)
-        let rate_limit_key = format!("login_attempts:{}", app.test_user.username);
+        // Fetch your custom brute-force tracking key inside your namespace prefix
+        let rate_limit_key = format!(
+            "{}:login_attempts:{}",
+            app.redis_namespace, app.test_user.username
+        );
         let state_json: String = redis::cmd("GET")
             .arg(&rate_limit_key)
             .query_async(&mut con)
@@ -415,7 +409,7 @@ async fn login_attempts_exceeding_threshold_returns_429() {
         assert_eq!(state["is_quarantined"].as_bool().unwrap(), false);
     }
 
-    // 4th attempt exceeds threshold
+    // 3rd attempt exceeds threshold
     let response = bad_user.login(&app).await;
     let status = response.status().as_u16();
     // 1. Parse the JSON body immediately (this consumes the response stream)
@@ -439,23 +433,10 @@ async fn login_attempts_exceeding_threshold_returns_429() {
     );
 }
 
-// Write a red test to confirm that indeed if a user is put under quarantine for multiple login attempts that they will keep getting 429.
 #[tokio::test]
 async fn user_in_quarantine_continually_gets_429() {
     // Arrange
     let app = spawn_app(HibpTarget::LiveProduction).await;
-
-    // Clean slate
-    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
-    let mut con = redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .unwrap();
-
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut con)
-        .await
-        .expect("Failed to flush test Redis database");
 
     let bad_user = app.test_user.clone_with_bad_password();
 
@@ -474,23 +455,10 @@ async fn user_in_quarantine_continually_gets_429() {
     );
 }
 
-// Write a red test to confirm that indeed after quarantine time passes the user who was under quarantine can now login getting back 200.
 #[tokio::test]
 async fn user_can_login_successfully_after_quarantine_expires() {
     // Arrange
     let app = spawn_app(HibpTarget::LiveProduction).await;
-
-    // Clean slate
-    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
-    let mut con = redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .unwrap();
-
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut con)
-        .await
-        .expect("Failed to flush test Redis database");
 
     let bad_user = app.test_user.clone_with_bad_password();
 
@@ -498,6 +466,12 @@ async fn user_can_login_successfully_after_quarantine_expires() {
     for _ in 0..4 {
         let _ = bad_user.login(&app).await;
     }
+    //assert that the user is getting 429 at this point
+    let last_status_code = bad_user.login(&app).await.status().as_u16();
+    assert_eq!(
+        last_status_code, 429,
+        "Expected the status code to be 429 got otherwise."
+    );
 
     // Wait out the quarantine period (configured to a short 2s window via configuration setup in spawn_app)
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -513,7 +487,6 @@ async fn user_can_login_successfully_after_quarantine_expires() {
     );
 }
 
-// Write a test to Check for the edge case that when I login are more than one sessions created for that user id, that way we are sure none indeed are.
 #[tokio::test]
 async fn login_creates_exactly_one_session_and_no_duplicates() {
     let app = spawn_app(HibpTarget::LiveProduction).await;
@@ -524,26 +497,23 @@ async fn login_creates_exactly_one_session_and_no_duplicates() {
         .await
         .unwrap();
 
-    let _: () = redis::cmd("FLUSHDB")
-        .query_async(&mut con)
-        .await
-        .expect("Failed to flush test Redis database");
-
     // Log in successfully
     let response = app.test_user.login(&app).await;
     assert_eq!(response.status().as_u16(), 200);
 
-    // Query all keys in Redis
+    // Query keys scoped to this namespace instance context
+    let pattern = format!("{}:*", app.redis_namespace);
     let keys: Vec<String> = redis::cmd("KEYS")
-        .arg("*")
+        .arg(&pattern)
         .query_async(&mut con)
         .await
         .unwrap();
 
-    // Filter to isolate ONLY actix-session keys, ignoring our custom "login_attempts:*" tracker key
+    // Filter to isolate ONLY your namespaced actix-session keys
+    let tracker_prefix = format!("{}:login_attempts:", app.redis_namespace);
     let session_keys: Vec<&String> = keys
         .iter()
-        .filter(|key| !key.starts_with("login_attempts:"))
+        .filter(|key| !key.starts_with(&tracker_prefix))
         .collect();
 
     assert_eq!(
@@ -555,4 +525,3 @@ async fn login_creates_exactly_one_session_and_no_duplicates() {
 }
 //delete
 //patch
-
