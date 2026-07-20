@@ -22,9 +22,22 @@ pub struct LoginTracker {
 }
 
 impl LoginTracker {
+    /// Helper to generate a namespaced key
+    fn make_key(namespace: &str, username: &str) -> String {
+        if namespace.is_empty() {
+            format!("login_attempts:{}", username)
+        } else {
+            format!("{}:login_attempts:{}", namespace, username)
+        }
+    }
+
     /// Fetches the tracker state for a given username from Redis.
-    async fn fetch(con: &mut MultiplexedConnection, username: &str) -> Result<Self, LoginError> {
-        let tracker_key = format!("login_attempts:{}", username);
+    async fn fetch(
+        con: &mut MultiplexedConnection,
+        namespace: &str,
+        username: &str,
+    ) -> Result<Self, LoginError> {
+        let tracker_key = Self::make_key(namespace, username);
         let tracker_json: Option<String> = con
             .get(&tracker_key)
             .await
@@ -55,6 +68,7 @@ impl LoginTracker {
     async fn register_failure(
         &mut self,
         con: &mut MultiplexedConnection,
+        namespace: &str,
         username: &str,
         quarantine_seconds: i64,
     ) -> Result<(), LoginError> {
@@ -64,7 +78,7 @@ impl LoginTracker {
             self.quarantined_until = Some(Utc::now() + Duration::seconds(quarantine_seconds));
         }
 
-        let tracker_key = format!("login_attempts:{}", username);
+        let tracker_key = Self::make_key(namespace, username);
         let serialized =
             serde_json::to_string(&self).map_err(|e| LoginError::UnexpectedError(e.into()))?;
 
@@ -78,8 +92,12 @@ impl LoginTracker {
     }
 
     /// Clears any tracking data from Redis upon successful authentication.
-    async fn clear(con: &mut MultiplexedConnection, username: &str) -> Result<(), LoginError> {
-        let tracker_key = format!("login_attempts:{}", username);
+    async fn clear(
+        con: &mut MultiplexedConnection,
+        namespace: &str,
+        username: &str,
+    ) -> Result<(), LoginError> {
+        let tracker_key = Self::make_key(namespace, username);
         let _: () = con
             .del(&tracker_key)
             .await
@@ -87,7 +105,6 @@ impl LoginTracker {
         Ok(())
     }
 }
-
 // --- Handler ---
 
 pub async fn login(
@@ -111,8 +128,11 @@ pub async fn login(
         .await
         .map_err(|e| LoginError::UnexpectedError(e.into()))?;
 
+    // Extract namespace from settings configuration context
+    let namespace = &settings.application.redis_namespace;
+
     // 1. Rate limiting checks
-    let mut tracker = LoginTracker::fetch(&mut con, username_str).await?;
+    let mut tracker = LoginTracker::fetch(&mut con, namespace, username_str).await?;
     tracker.check_quarantine()?;
 
     // 2. Authenticate
@@ -120,7 +140,7 @@ pub async fn login(
         Ok(user_id) => {
             tracing::Span::current().record("user_id", tracing::field::display(&user_id));
 
-            LoginTracker::clear(&mut con, username_str).await?;
+            LoginTracker::clear(&mut con, namespace, username_str).await?;
 
             session.renew();
             session
@@ -134,6 +154,7 @@ pub async fn login(
                 tracker
                     .register_failure(
                         &mut con,
+                        namespace,
                         username_str,
                         settings.application.quarantine_duration_seconds,
                     )
