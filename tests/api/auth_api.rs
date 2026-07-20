@@ -298,6 +298,24 @@ async fn login_returns_200() {
 }
 
 #[tokio::test]
+async fn invalid_login_returns_401() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Act
+    let bad_user = app.test_user.clone_with_bad_password();
+    let response = bad_user.login(&app).await;
+
+    // Assert
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "The API failed to throw 401 for invalid credentials. Response body: {:?}",
+        response.text().await
+    );
+}
+
+#[tokio::test]
 async fn session_persisted_on_login() {
     // Arrange
     let app = spawn_app(HibpTarget::LiveProduction).await;
