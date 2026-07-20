@@ -523,5 +523,96 @@ async fn login_creates_exactly_one_session_and_no_duplicates() {
         session_keys
     );
 }
+
+// Write a test for load testing login ep Needs updating to match spec
+#[tokio::test]
+async fn login_latency_doesnt_drop_past_threshold_and_targets_under_load_with_k6() {
+    // House keeping
+    // Skip performance testing under coverage tracking due to instrumentation overhead
+    if std::env::var("TARPAULIN").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
+        return;
+    }
+
+    // Arrange
+    // Going with the mock option to avoid assaulting the real HIBP website while testing
+    let app = spawn_app(HibpTarget::Mock).await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/range/[0-9A-FA-f]{5}$"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("0018A45135D29:0")
+                .set_delay(Duration::from_millis(250)),
+        )
+        .mount(&app.hibp_server)
+        .await;
+
+    // Compile your TypeScript files locally first so Docker can read the plain JS bundle
+    let pnpm_bundle = tokio::process::Command::new("pnpm")
+        .current_dir("./load_tests")
+        .args(["run", "bundle"])
+        .output()
+        .await
+        .map_err(|err| format!("Failed to execute TypeScript compiler bundle sequence: {err}"))
+        .unwrap();
+
+    assert!(
+        pnpm_bundle.status.success(),
+        "TypeScript compilation failed!\n\nSTDOUT:\n{}\n\nSTDERR:\n{}",
+        String::from_utf8_lossy(&pnpm_bundle.stdout),
+        String::from_utf8_lossy(&pnpm_bundle.stderr)
+    );
+
+    // Map 'localhost' to the special Docker host routing address
+    let docker_target_address = get_docker_accessible_url(app.current_port);
+
+    let project_root =
+        std::env::current_dir().expect("Failed to determine current workspace directory");
+    let dist_volume_mount = format!("{}/load_tests/dist:/apps/dist", project_root.display());
+    let summary_volume_mount = format!(
+        "{}/load_tests/benchmarks:/apps/benchmarks",
+        project_root.display()
+    );
+
+    // Act: Trigger the official k6 Docker container
+    let k6_run = tokio::process::Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            // Crucial for network bridging out to the host loopback interface
+            "--add-host",
+            "host.docker.internal:host-gateway",
+            // Absolute path volume mounting maps reliably inside the cargo runner
+            "-v",
+            &dist_volume_mount,
+            "-v",
+            &summary_volume_mount,
+            // Match the working manual CLI variable mapping
+            "-e",
+            &format!("K6_ENV_BASE_URL={}", docker_target_address),
+            // Inject the runtime test credentials to force k6 down the heavy Argon2 path
+            "-e",
+            &format!("TARGET_USER_NAME={}", app.test_user.username),
+            "-e",
+            &format!("TARGET_USER_PASSWORD={}", app.test_user.password),
+            "grafana/k6:latest",
+            "run",
+            "/apps/dist/login_stress.js",
+        ])
+        .output()
+        .await
+        .map_err(|err| format!("Failed to execute Docker k6 container: {err}"))
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&k6_run.stdout);
+    let stderr = String::from_utf8_lossy(&k6_run.stderr);
+
+    // Assert: Traps performance regressions or structural threshold failures perfectly!
+    assert!(
+        k6_run.status.success(),
+        "LOGIN PERFORMANCE REGRESSION TRAPPED BY DOCKER K6 CONTAINER!\n\nSTDOUT:\n{}\nSTDERR:\n{}",
+        stdout,
+        stderr
+    );
+}
 //delete
 //patch
