@@ -5,6 +5,11 @@ export interface SignupPayload {
   password: string;
 }
 
+export interface LoginPayload {
+  name: string;
+  password: string;
+}
+
 /**
  * Generates a unique, deterministic registration payload
  * using k6's execution identifiers.
@@ -12,6 +17,17 @@ export interface SignupPayload {
 export function generateSignupPayload(vu: number, iter: number): SignupPayload {
   return {
     name: `ts-user-${vu}-${iter}-${crypto.randomUUID().slice(0, 8)}`,
+    password: "Super-Secure-Password-123!",
+  };
+}
+
+/**
+ * Generates a structured login payload matching the
+ * domain complexity and naming format of the application.
+ */
+export function generateLoginPayload(vu: number, iter: number): LoginPayload {
+  return {
+    name: `ts-user-${vu}-${iter}`,
     password: "Super-Secure-Password-123!",
   };
 }

@@ -1,17 +1,19 @@
+use argon2::password_hash::SaltString;
+use argon2::{Algorithm, Argon2, Params, PasswordHasher, Version};
 use authpractice::configuration::{DatabaseSettings, get_configuration};
-use authpractice::end_points::{HEALTH_CHECK, USERS};
-use authpractice::startup::run;
+use authpractice::end_points::{AUTH, HEALTH_CHECK, USERS};
+use authpractice::startup::{Application, get_connection_pool};
 use authpractice::telemetry::{get_subscriber, init_subscriber};
-use once_cell::sync::Lazy;
-use secrecy::ExposeSecret;
+use chrono::Utc;
+use secrecy::{ExposeSecret, Secret};
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::env;
-use std::net::TcpListener;
+use std::sync::LazyLock;
 use uuid::Uuid;
 use wiremock::MockServer;
 
 // Ensure that the `tracing` stack is only initialised once using `once_cell`
-static TRACING: Lazy<()> = Lazy::new(|| {
+static TRACING: LazyLock<()> = LazyLock::new(|| {
     let default_filter_level = "info".to_string();
     let subscriber_name = "test".to_string();
     if std::env::var("TEST_LOG").is_ok() {
@@ -32,6 +34,9 @@ pub struct TestApp {
     pub db_pool: PgPool,
     pub api_client: reqwest::Client,
     pub hibp_server: MockServer,
+    pub test_user: TestUser,
+    pub redis_uri: String,
+    pub redis_namespace: String,
 }
 
 /// Determines the network routing target for the Have I Been Pwned (HIBP) API.
@@ -53,6 +58,18 @@ impl TestApp {
     {
         self.api_client
             .post(&format!("{}{}", &self.address, USERS))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_login<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(&format!("{}{}", &self.address, AUTH))
             .json(body)
             .send()
             .await
@@ -100,7 +117,7 @@ pub fn get_docker_accessible_url(local_port: u16) -> String {
 /// let app = spawn_app(HibpTarget::LiveProduction).await;
 /// ```
 pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
-    Lazy::force(&TRACING);
+    LazyLock::force(&TRACING);
 
     // Launch the mock HIBP server first on a random local port
     let mock_hibp_server = MockServer::start().await;
@@ -109,34 +126,52 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
     // our own sign up, so this is a much less stressful way that avoids all that.
     // Instruct the Mock to mimic HIBP's range API and hold connections for 250ms
     // Changed "127.0.0.1:0" to "0.0.0.0:0" to allow the ephemeral k6 container to fbe able to call the api in ci.
-    let listener = TcpListener::bind("0.0.0.0:0").expect("Failed to bind random port");
+    // let listener = TcpListener::bind("0.0.0.0:0").expect("Failed to bind random port");
     // We retrieve the port assigned to us by the OS
-    let port = listener.local_addr().unwrap().port();
+    // let port = listener.local_addr().unwrap().port();
 
-    let mut configuration = get_configuration().expect("Failed to read configuration.");
-    configuration.database.database_name = Uuid::new_v4().to_string();
-    // This is entirely isolated to this test thread execution context.
-    // Read the enum target to decide where to route the application configuration!
-    match hibp_target {
-        HibpTarget::Mock => {
-            configuration.application.hibp_api_url = mock_hibp_server.uri();
-        }
-        HibpTarget::LiveProduction => {
-            configuration.application.hibp_api_url = "https://api.pwnedpasswords.com".to_string();
-        }
-    }
+    // Generate a single UUID prefix used for both Postgres and Redis isolation
+    let test_isolation_id = Uuid::new_v4().to_string();
 
-    let connection_pool = configure_database(&configuration.database).await;
-    let server = run(
-        listener,
-        connection_pool.clone(),
-        configuration.application.hibp_api_url.clone(),
-    )
-    .expect("Failed to bind address");
-    let _ = tokio::spawn(server);
+    let configuration = {
+        let mut c = get_configuration().expect("Failed to read configuration.");
+        // Use a different database for each test case
+        c.database.database_name = test_isolation_id.clone();
+        // Use a random OS port
+        c.application.port = 0;
+        // This is entirely isolated to this test thread execution context.
+        // Read the enum target to decide where to route the application configuration!
+        // OVERRIDE FOR FAST TESTS:
+        // Force the quarantine duration to 2 seconds instead of the 1 hour production default
+        c.application.quarantine_duration_seconds = 2;
+
+        // Isolate Redis via Keyspace Namespacing
+        c.application.redis_namespace = test_isolation_id.clone();
+
+        match hibp_target {
+            HibpTarget::Mock => {
+                c.application.hibp_api_url = mock_hibp_server.uri();
+            }
+            HibpTarget::LiveProduction => {
+                c.application.hibp_api_url = "https://api.pwnedpasswords.com".to_string();
+            }
+        }
+        c
+    };
+
+    // Create and migrate the database
+    configure_database(&configuration.database).await;
+
+    // Launch the application as a background task
+    let application = Application::build(configuration.clone())
+        .await
+        .expect("Failed to build application.");
+
+    let application_port = application.port();
+    let _ = tokio::spawn(application.run_until_stopped());
 
     // We return the application address to the caller!
-    let address = format!("http://127.0.0.1:{}", port);
+    let address = format!("http://127.0.0.1:{}", application_port);
 
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -144,21 +179,32 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         .build()
         .unwrap();
 
-    TestApp {
+    let test_app = TestApp {
         address,
-        db_pool: connection_pool,
+        db_pool: get_connection_pool(&configuration.database),
         api_client: client,
         hibp_server: mock_hibp_server,
-        current_port: port,
-    }
+        current_port: application_port,
+        test_user: TestUser::generate(),
+        redis_uri: configuration.redis_uri.expose_secret().clone(),
+        redis_namespace: test_isolation_id,
+    };
+    test_app.test_user.store(&test_app.db_pool).await;
+
+    test_app
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
     // Create database
-    let mut connection = PgConnection::connect_with(&config.without_db())
+    let maintenance_settings = DatabaseSettings {
+        database_name: "postgres".to_string(),
+        username: "postgres".to_string(),
+        password: Secret::new("password".to_string()),
+        ..config.clone()
+    };
+    let mut connection = PgConnection::connect_with(&maintenance_settings.connect_options())
         .await
         .expect("Failed to connect to Postgres");
-
     connection
         .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
         .await
@@ -173,4 +219,61 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .await
         .expect("Failed to migrate the database");
     connection_pool
+}
+
+pub struct TestUser {
+    user_id: Uuid,
+    pub username: String,
+    pub password: String,
+}
+
+impl TestUser {
+    pub fn generate() -> Self {
+        Self {
+            user_id: Uuid::new_v4(),
+            username: Uuid::new_v4().to_string(),
+            password: Uuid::new_v4().to_string(),
+        }
+    }
+
+    /// Generates a copy of this user with an incorrect password to trigger failed login logic
+    pub fn clone_with_bad_password(&self) -> Self {
+        Self {
+            user_id: self.user_id,
+            username: self.username.clone(),
+            password: format!("{}-wrong-password", self.password),
+        }
+    }
+
+    pub async fn login(&self, app: &TestApp) -> reqwest::Response {
+        app.post_login(&serde_json::json!({
+            "name": &self.username,
+            "password": &self.password
+        }))
+        .await
+    }
+
+    async fn store(&self, pool: &PgPool) {
+        let salt = SaltString::generate(&mut rand::thread_rng());
+        // Match production parameters
+        let password_hash = Argon2::new(
+            Algorithm::Argon2id,
+            Version::V0x13,
+            Params::new(15000, 2, 1, None).unwrap(),
+        )
+        .hash_password(self.password.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+        sqlx::query!(
+            "INSERT INTO users (user_id, user_name, password_hash, signed_up_at)
+            VALUES ($1, $2, $3, $4)",
+            self.user_id,
+            self.username,
+            password_hash,
+            Utc::now()
+        )
+        .execute(pool)
+        .await
+        .expect("Failed to store test user.");
+    }
 }

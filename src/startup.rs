@@ -1,15 +1,50 @@
 use std::net::TcpListener;
 
-use actix_web::{App, HttpResponse, HttpServer, Responder, dev::Server, web};
+use actix_session::{SessionMiddleware, storage::RedisSessionStore};
+use actix_web::{App, HttpResponse, HttpServer, Responder, cookie::Key, dev::Server, web};
 
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use sqlx::PgPool;
+use secrecy::ExposeSecret;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use tracing_actix_web::TracingLogger;
 
 use crate::{
-    end_points::{HEALTH_CHECK, USERS},
-    routes::{create_user_account, health_check},
+    configuration::{DatabaseSettings, Settings},
+    end_points::{AUTH, HEALTH_CHECK, METRICS, USERS},
+    routes::{create_user_account, health_check, login},
 };
+
+pub struct Application {
+    port: u16,
+    server: Server,
+}
+
+impl Application {
+    pub async fn build(configuration: Settings) -> Result<Self, anyhow::Error> {
+        let connection_pool = get_connection_pool(&configuration.database);
+
+        let address = format!(
+            "{}:{}",
+            configuration.application.host, configuration.application.port
+        );
+        let listener = TcpListener::bind(address)?;
+        let port = listener.local_addr().unwrap().port();
+        let server = run(listener, connection_pool, configuration).await?;
+        Ok(Self { port, server })
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub async fn run_until_stopped(self) -> Result<(), std::io::Error> {
+        self.server.await
+    }
+}
+
+pub fn get_connection_pool(configuration: &DatabaseSettings) -> PgPool {
+    PgPoolOptions::new().connect_lazy_with(configuration.connect_options())
+}
 
 pub struct ApplicationBaseUrl(pub String);
 
@@ -47,24 +82,53 @@ async fn metrics_endpoint(db_pool: web::Data<PgPool>) -> impl Responder {
     }
 }
 
-pub fn run(
+async fn run(
     listener: TcpListener,
     db_pool: PgPool,
-    hibp_api_url: String,
-) -> Result<Server, std::io::Error> {
+    config: Settings,
+) -> Result<Server, anyhow::Error> {
     // Wrap the pool using web::Data, which boils down to an Arc smart pointer
     let connection = web::Data::new(db_pool);
-    let base_url = web::Data::new(ApplicationBaseUrl(hibp_api_url));
+    let settings_data = web::Data::new(config.clone());
+    let base_url = web::Data::new(ApplicationBaseUrl(config.application.hibp_api_url));
+
+    // let redis_store = RedisSessionStore::new(config.redis_uri.expose_secret()).await?;
+    // 1. Configure the actix-session storage engine using the custom key prefix namespace.
+    // If the namespace is empty (production fallback), it preserves the default key structure.
+    let namespace = config.application.redis_namespace;
+    let session_store_builder = RedisSessionStore::builder(config.redis_uri.expose_secret());
+
+    let redis_store = if !namespace.is_empty() {
+        session_store_builder
+            // We append a trailing colon to separate our namespace from the session key UUIDs
+            // Intercept the generated session key and prepend your test UUID namespace
+            .cache_keygen(move |session_key| format!("{}:session:{}", namespace, session_key))
+            .build()
+            .await?
+    } else {
+        session_store_builder.build().await?
+    };
+    let redis_client = redis::Client::open(config.redis_uri.expose_secret().as_str())?;
+    let redis_data = web::Data::new(redis_client);
+
+    let secret_key = Key::from(config.application.hmac_secret.expose_secret().as_bytes());
     let server = HttpServer::new(move || {
         App::new()
+            .wrap(SessionMiddleware::new(
+                redis_store.clone(),
+                secret_key.clone(),
+            ))
             .wrap(TracingLogger::default())
             .route(HEALTH_CHECK, web::get().to(health_check))
             .route(USERS, web::post().to(create_user_account))
-            .route("/metrics", web::get().to(metrics_endpoint))
+            .route(AUTH, web::post().to(login))
+            .route(METRICS, web::get().to(metrics_endpoint))
             // Register the connection as part of the application state
             // Get a pointer copy and attach it to the application state
             .app_data(connection.clone())
             .app_data(base_url.clone())
+            .app_data(redis_data.clone())
+            .app_data(settings_data.clone())
     })
     .listen(listener)?
     .run();

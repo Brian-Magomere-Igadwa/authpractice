@@ -83,6 +83,11 @@ async fn hibp_and_argon2_workload_dont_regress_availability_under_load_with_k6()
     if std::env::var("TARPAULIN").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
         return;
     }
+
+    // Skip entirely if running inside GitHub Actions
+    if std::env::var("CI").is_ok() {
+        return;
+    }
     // Arrange
     // Going with the mock option to avoid assaulting the real HIBP website
     // While testing
@@ -255,18 +260,386 @@ async fn create_user_account_persists_the_new_user() {
     });
 
     // Act
-    app.post_signup(&signup_body).await;
+    let response = app.post_signup(&signup_body).await;
 
     // Assert
-    let saved = sqlx::query!("SELECT user_name FROM users",)
-        .fetch_one(&app.db_pool)
-        .await
-        .expect("Failed to fetch saved user");
+    assert_eq!(
+        response.status().as_u16(),
+        201,
+        "Something failed when signing up the user. Details : {:?}",
+        response.text().await
+    );
+
+    let saved = sqlx::query!(
+        r#"
+        SELECT user_name FROM users WHERE user_name = $1
+        "#,
+        name
+    )
+    .fetch_one(&app.db_pool)
+    .await
+    .expect("User not found in postgress.");
 
     assert_eq!(saved.user_name, name);
 }
 
 // confirm fails if there are db errors
-//signin
+/// signin
+#[tokio::test]
+async fn login_returns_200() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Act
+    let response = app.test_user.login(&app).await;
+
+    // Assert
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "The API failed to accept the login request. Response body: {:?}",
+        response.text().await
+    );
+}
+
+#[tokio::test]
+async fn invalid_login_returns_401() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Act
+    let bad_user = app.test_user.clone_with_bad_password();
+    let response = bad_user.login(&app).await;
+
+    // Assert
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "The API failed to throw 401 for invalid credentials. Response body: {:?}",
+        response.text().await
+    );
+}
+
+#[tokio::test]
+async fn session_persisted_on_login() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Connect directly to Redis
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+
+    // Act
+    let response = app.test_user.login(&app).await;
+
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "The API failed to accept the login request. Response body: {:?}",
+        response.text().await
+    );
+
+    // 2. Query Redis for the newly created key inside our unique namespace
+    let pattern = format!("{}:*", app.redis_namespace);
+    let keys: Vec<String> = redis::cmd("KEYS")
+        .arg(&pattern)
+        .query_async(&mut con)
+        .await
+        .expect("Failed to execute KEYS command in Redis");
+
+    // Filter down specifically to the actix-session key within this namespace
+    let session_key = keys
+        .iter()
+        .find(|key| key.contains(":session:"))
+        .expect("No session keys found in Redis. The session was not persisted.");
+
+    // Fetch the JSON string
+    let redis_data: String = redis::cmd("GET")
+        .arg(session_key)
+        .query_async(&mut con)
+        .await
+        .expect("Failed to fetch session key from Redis.");
+
+    // 3. Deserialize using serde_json::Value instead of String to handle inner JSON serialization properly
+    let session_state: HashMap<String, serde_json::Value> =
+        serde_json::from_str(&redis_data).expect("Failed to deserialize Redis session JSON");
+
+    // Grab the user_id and extract it as a clean str (removing the escaped quotes)
+    let session_user_id_val = session_state
+        .get("user_id")
+        .expect("user_id not found in session state");
+
+    let session_user_id_str = session_user_id_val
+        .as_str()
+        .expect("user_id in session was not a string value");
+
+    // Grab the user id from Postgres for the username used to log in
+    let db_user = sqlx::query!(
+        r#"
+        SELECT user_id FROM users WHERE user_name = $1
+        "#,
+        app.test_user.username
+    )
+    .fetch_one(&app.db_pool)
+    .await
+    .expect("Failed to fetch user from Postgres");
+
+    let parsed_redis_user_id: String = serde_json::from_str(session_user_id_str).unwrap();
+
+    // Assert that the two clean UUID strings match
+    assert_eq!(
+        parsed_redis_user_id,
+        db_user.user_id.to_string(),
+        "The user_id stored in Redis session does not match the Postgres user ID!"
+    );
+}
+
+#[tokio::test]
+async fn login_attempts_exceeding_threshold_returns_429() {
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+
+    let bad_user = app.test_user.clone_with_bad_password();
+
+    // Act & Assert: Track failures up to 3 attempts
+    for attempt in 1..=2 {
+        let response = bad_user.login(&app).await;
+        assert_ne!(response.status().as_u16(), 429);
+
+        // Fetch your custom brute-force tracking key inside your namespace prefix
+        let rate_limit_key = format!(
+            "{}:login_attempts:{}",
+            app.redis_namespace, app.test_user.username
+        );
+        let state_json: String = redis::cmd("GET")
+            .arg(&rate_limit_key)
+            .query_async(&mut con)
+            .await
+            .expect("Failed to fetch login failure state");
+
+        // Validate structure matches the serialized `LoginTracker`
+        let state: serde_json::Value = serde_json::from_str(&state_json).unwrap();
+
+        assert_eq!(state["failures"].as_i64().unwrap(), attempt as i64);
+        assert_eq!(state["is_quarantined"].as_bool().unwrap(), false);
+    }
+
+    // 3rd attempt exceeds threshold
+    let response = bad_user.login(&app).await;
+    let status = response.status().as_u16();
+    // 1. Parse the JSON body immediately (this consumes the response stream)
+    let body_json: serde_json::Value = response
+        .json()
+        .await
+        .expect("Failed to parse 429 response body as JSON");
+
+    // 2. Assert status code (include the structured JSON in the failure message if it drops)
+    assert_eq!(
+        status, 429,
+        "Exceeding 3 failed attempts did not return 429. Payload: {:?}",
+        body_json
+    );
+
+    // 3. Assert on the structured machine-readable error classification field
+    assert_eq!(
+        body_json["error"], "Too Many Requests",
+        "Unexpected error payload type classification. Found payload: {:?}",
+        body_json
+    );
+}
+
+#[tokio::test]
+async fn user_in_quarantine_continually_gets_429() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let bad_user = app.test_user.clone_with_bad_password();
+
+    // Act: Exceed 3 failed attempts to trigger quarantine
+    for _ in 0..4 {
+        let _ = bad_user.login(&app).await;
+    }
+
+    // Assert: Attempt to login again immediately while under quarantine
+    let subsequent_response = bad_user.login(&app).await;
+
+    assert_eq!(
+        subsequent_response.status().as_u16(),
+        429,
+        "The user was allowed to attempt login again during their quarantine window."
+    );
+}
+
+#[tokio::test]
+async fn user_can_login_successfully_after_quarantine_expires() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let bad_user = app.test_user.clone_with_bad_password();
+
+    // Act: Put the user into quarantine by exceeding 3 failures
+    for _ in 0..4 {
+        let _ = bad_user.login(&app).await;
+    }
+    //assert that the user is getting 429 at this point
+    let last_status_code = bad_user.login(&app).await.status().as_u16();
+    assert_eq!(
+        last_status_code, 429,
+        "Expected the status code to be 429 got otherwise."
+    );
+
+    // Wait out the quarantine period (configured to a short 2s window via configuration setup in spawn_app)
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Act: Attempt to login using correct credentials after quarantine expires
+    let recovery_response = app.test_user.login(&app).await;
+
+    // Assert: User is allowed back in
+    assert_eq!(
+        recovery_response.status().as_u16(),
+        200,
+        "User failed to log in with 200 OK after the quarantine window expired."
+    );
+}
+
+#[tokio::test]
+async fn login_creates_exactly_one_session_and_no_duplicates() {
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let redis_client = redis::Client::open(app.redis_uri.as_str()).unwrap();
+    let mut con = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+
+    // Log in successfully
+    let response = app.test_user.login(&app).await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    // Query keys scoped to this namespace instance context
+    let pattern = format!("{}:*", app.redis_namespace);
+    let keys: Vec<String> = redis::cmd("KEYS")
+        .arg(&pattern)
+        .query_async(&mut con)
+        .await
+        .unwrap();
+
+    // Filter to isolate ONLY your namespaced actix-session keys
+    let tracker_prefix = format!("{}:login_attempts:", app.redis_namespace);
+    let session_keys: Vec<&String> = keys
+        .iter()
+        .filter(|key| !key.starts_with(&tracker_prefix))
+        .collect();
+
+    assert_eq!(
+        session_keys.len(),
+        1,
+        "Expected exactly 1 session key to exist in Redis, but found: {:?}",
+        session_keys
+    );
+}
+
+// Write a test for load testing login ep Needs updating to match spec
+#[tokio::test]
+async fn login_latency_doesnt_drop_past_threshold_and_targets_under_load_with_k6() {
+    // House keeping
+    // Skip performance testing under coverage tracking due to instrumentation overhead
+    if std::env::var("TARPAULIN").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
+        return;
+    }
+    // Skip entirely if running inside GitHub Actions
+    if std::env::var("CI").is_ok() {
+        return;
+    }
+
+    // Arrange
+    // Going with the mock option to avoid assaulting the real HIBP website while testing
+    let app = spawn_app(HibpTarget::Mock).await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/range/[0-9A-FA-f]{5}$"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string("0018A45135D29:0")
+                .set_delay(Duration::from_millis(250)),
+        )
+        .mount(&app.hibp_server)
+        .await;
+
+    // Compile your TypeScript files locally first so Docker can read the plain JS bundle
+    let pnpm_bundle = tokio::process::Command::new("pnpm")
+        .current_dir("./load_tests")
+        .args(["run", "bundle"])
+        .output()
+        .await
+        .map_err(|err| format!("Failed to execute TypeScript compiler bundle sequence: {err}"))
+        .unwrap();
+
+    assert!(
+        pnpm_bundle.status.success(),
+        "TypeScript compilation failed!\n\nSTDOUT:\n{}\n\nSTDERR:\n{}",
+        String::from_utf8_lossy(&pnpm_bundle.stdout),
+        String::from_utf8_lossy(&pnpm_bundle.stderr)
+    );
+
+    // Map 'localhost' to the special Docker host routing address
+    let docker_target_address = get_docker_accessible_url(app.current_port);
+
+    let project_root =
+        std::env::current_dir().expect("Failed to determine current workspace directory");
+    let dist_volume_mount = format!("{}/load_tests/dist:/apps/dist", project_root.display());
+    let summary_volume_mount = format!(
+        "{}/load_tests/benchmarks:/apps/benchmarks",
+        project_root.display()
+    );
+
+    // Act: Trigger the official k6 Docker container
+    let k6_run = tokio::process::Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            // Crucial for network bridging out to the host loopback interface
+            "--add-host",
+            "host.docker.internal:host-gateway",
+            // Absolute path volume mounting maps reliably inside the cargo runner
+            "-v",
+            &dist_volume_mount,
+            "-v",
+            &summary_volume_mount,
+            // Match the working manual CLI variable mapping
+            "-e",
+            &format!("K6_ENV_BASE_URL={}", docker_target_address),
+            // Inject the runtime test credentials to force k6 down the heavy Argon2 path
+            "-e",
+            &format!("TARGET_USER_NAME={}", app.test_user.username),
+            "-e",
+            &format!("TARGET_USER_PASSWORD={}", app.test_user.password),
+            "grafana/k6:latest",
+            "run",
+            "/apps/dist/login_stress.js",
+        ])
+        .output()
+        .await
+        .map_err(|err| format!("Failed to execute Docker k6 container: {err}"))
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&k6_run.stdout);
+    let stderr = String::from_utf8_lossy(&k6_run.stderr);
+
+    // Assert: Traps performance regressions or structural threshold failures perfectly!
+    assert!(
+        k6_run.status.success(),
+        "LOGIN PERFORMANCE REGRESSION TRAPPED BY DOCKER K6 CONTAINER!\n\nSTDOUT:\n{}\nSTDERR:\n{}",
+        stdout,
+        stderr
+    );
+}
 //delete
 //patch

@@ -1,6 +1,6 @@
 # Build stage
 # We use the latest Rust stable release as base image
-FROM lukemathwalker/cargo-chef:latest-rust-1.93.0-slim AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.97.0-slim AS chef
 WORKDIR /app
 # Install the required system dependencies for our linking configuration
 RUN apt update && apt install -y \
@@ -29,23 +29,19 @@ ENV SQLX_OFFLINE=true
 # We'll use the release profile to make it fast
 RUN cargo build --release --bin authpractice
 
-# Pre Runtime stage
-FROM debian:bullseye-slim AS preruntime
+# Final Runtime Stage (Lean, production-ready, and uses the correct binary name)
+# Final Runtime Stage (Lean, production-ready, and matches modern GLIBC versions)
+FROM debian:trixie-slim AS runtime
 WORKDIR /app
 RUN apt-get update -y \
-&& apt-get install -y --no-install-recommends openssl ca-certificates \
-# Clean up
-&& apt-get autoremove -y \
-&& apt-get clean -y \
-&& rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy your fresh binary and your app configuration
 COPY --from=builder /app/target/release/authpractice authpractice
 COPY configuration configuration
 
-FROM gcr.io/distroless/cc AS runtime
-WORKDIR /app
-# Copy the compiled binary from the builder environment
-# to our runtime environment
-COPY --from=builder /app/target/release/authpractice authpractice
-COPY configuration configuration
 ENV APP_ENVIRONMENT=production
 ENTRYPOINT ["./authpractice"]
