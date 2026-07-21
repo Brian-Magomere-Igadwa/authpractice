@@ -169,7 +169,7 @@ pub async fn login(
                     .map_err(|e| LoginError::UnexpectedError(e.into()))?;
 
                 let _: () = con
-                    .expire(&user_session_key, session_ttl as i64)
+                    .expire(&user_session_key, session_ttl)
                     .await
                     .map_err(|e| LoginError::UnexpectedError(e.into()))?;
             }

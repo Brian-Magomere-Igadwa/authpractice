@@ -172,17 +172,16 @@ pub async fn update_user_profile(
         .map_err(UpdateProfileError::UnexpectedError)?;
 
     // 3. LAYER 1 (Redis Cache Level Safety): Invalidate Active Sessions
-    if is_password_updated {
-        if let Err(e) =
+    if is_password_updated
+        && let Err(e) =
             revoke_user_sessions_in_redis(&redis, &settings.application.redis_namespace, user_id)
                 .await
-        {
-            tracing::warn!(
-                error.cause_chain = ?e,
-                "Failed to revoke Redis session tokens for user {}. DB row was locked during update.",
-                user_id
-            );
-        }
+    {
+        tracing::warn!(
+            error.cause_chain = ?e,
+            "Failed to revoke Redis session tokens for user {}. DB row was locked during update.",
+            user_id
+        );
     }
 
     metrics::counter!("auth_profile_update_total", "status" => "success").increment(1);
