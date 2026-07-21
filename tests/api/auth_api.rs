@@ -1,5 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
+use authpractice::domain::{Credentials, UserName, UserPassword, validate_credentials};
 use fake::{Fake, Faker};
 
 use wiremock::{
@@ -8,6 +9,9 @@ use wiremock::{
 };
 
 use crate::helpers::{HibpTarget, get_docker_accessible_url, spawn_app};
+
+use crate::authentication::validate_credentials;
+use crate::domain::{Credentials, UserName, UserPassword};
 
 #[tokio::test]
 async fn mis_shaped_auth_requests_are_rejected() {
@@ -641,5 +645,233 @@ async fn login_latency_doesnt_drop_past_threshold_and_targets_under_load_with_k6
         stderr
     );
 }
+
+///patch
+#[tokio::test]
+async fn updating_profile_with_session_does_indeed_update_the_user_in_db() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // 1. Log in existing user
+    let login_res = app.test_user.login(&app).await;
+    assert_eq!(
+        login_res.status().as_u16(),
+        200,
+        "Setup failed: Could not log in test user before attempting profile update."
+    );
+
+    let new_username_str = "brand-new-updated-username";
+    let new_password_str = "Updated-Secure-Pass-123!#";
+
+    let update_payload = serde_json::json!({
+        "username": new_username_str,
+        "password": new_password_str
+    });
+
+    // Act
+    // 2. Call PUT /user with active session
+    let update_response = app.put_user_profile(&update_payload).await;
+
+    assert_eq!(
+        update_response.status().as_u16(),
+        200,
+        "The API failed to update the user profile. Response body: {:?}",
+        update_response.text().await
+    );
+
+    // Assert
+    // 3. Re-parse domain types for the new credentials
+    let new_username = UserName::parse(new_username_str)
+        .expect("Failed to parse test username into UserName domain type");
+
+    let new_password = UserPassword::parse(new_password_str.to_string(), &app.hibp_url)
+        .await
+        .expect("Failed to parse test password into UserPassword domain type");
+
+    let credentials = Credentials {
+        username: new_username,
+        password: new_password,
+    };
+
+    // 4. Reuse validate_credentials directly against the DB pool!
+    let validated_user_id = validate_credentials(credentials, &app.db_pool)
+        .await
+        .expect("Failed to validate updated credentials against Postgres!");
+
+    // 5. Confirm the returned user_id matches our original user
+    assert_eq!(
+        validated_user_id, app.test_user.user_id,
+        "The validated user ID does not match the updated user!"
+    );
+}
+
+#[tokio::test]
+async fn updating_profile_without_session_yield_rejection() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+    let new_user_profile_body = serde_json::json!({
+        "name": name,
+        "password": pass
+    });
+
+    // Act
+    //deliberately missing login step guaranteeing no session
+    let response = app.put_user(&new_user_profile_body).await;
+    let status_code = response.status().as_u16();
+
+    // Assert
+    assert_eq!(
+        status_code,
+        403,
+        "Expected 403 for attempts to update profile without an existing session but got a different status code. Response body: {:?}",
+        response.text().await
+    );
+}
+
+/// Scenario C: Fake / Spoofed Session Token leads to rejection and quarantine
+#[tokio::test]
+async fn updating_profile_with_invalid_or_fake_token_returns_rejection() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let update_payload = serde_json::json!({
+        "username": "spoofed-user-attempt",
+        "password": "Some-New-Password-123!"
+    });
+
+    // Act - Send request with a completely fabricated session cookie
+    let response = app
+        .put_user_profile_with_raw_cookie(&update_payload, "actix-session=fake_invalid_token_12345")
+        .await;
+
+    // Assert - Should return 401/403
+    assert_eq!(
+        response.status().as_u16(),
+        401, // or 403 depending on your middleware setup
+        "Expected 401/403 for forged session token, but got a different status. Response body: {:?}",
+        response.text().await
+    );
+}
+
+/// Partial Update: Updating ONLY the username preserves the existing password
+#[tokio::test]
+async fn partial_update_username_only_preserves_existing_password() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Log in
+    let login_res = app.test_user.login(&app).await;
+    assert_eq!(
+        login_res.status().as_u16(),
+        200,
+        "Setup failed: login failed."
+    );
+
+    let new_username_str = "new-only-username-change";
+    let update_payload = serde_json::json!({
+        "username": new_username_str
+        // Password deliberately omitted
+    });
+
+    // Act
+    let update_response = app.put_user_profile(&update_payload).await;
+    assert_eq!(
+        update_response.status().as_u16(),
+        200,
+        "Partial profile update failed. Details: {:?}",
+        update_response.text().await
+    );
+
+    // Assert - Validate that original password STILL works with the NEW username
+    let new_username = UserName::parse(new_username_str).unwrap();
+    let original_password = UserPassword::parse(app.test_user.password.clone(), &app.hibp_url)
+        .await
+        .unwrap();
+
+    let credentials = Credentials {
+        username: new_username,
+        password: original_password,
+    };
+
+    let validated_id = validate_credentials(credentials, &app.db_pool)
+        .await
+        .expect("Failed to validate user credentials with new username and original password!");
+
+    assert_eq!(validated_id, app.test_user.user_id);
+}
+
+/// Partial Update: Updating ONLY the password preserves the existing username
+#[tokio::test]
+async fn partial_update_password_only_preserves_existing_username() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let login_res = app.test_user.login(&app).await;
+    assert_eq!(
+        login_res.status().as_u16(),
+        200,
+        "Setup failed: login failed."
+    );
+
+    let new_password_str = "Brand-New-Password-Only-456!";
+    let update_payload = serde_json::json!({
+        "password": new_password_str
+        // Username deliberately omitted
+    });
+
+    // Act
+    let update_response = app.put_user_profile(&update_payload).await;
+    assert_eq!(
+        update_response.status().as_u16(),
+        200,
+        "Partial profile update (password only) failed. Details: {:?}",
+        update_response.text().await
+    );
+
+    // Assert - Validate original username works with NEW password
+    let original_username = UserName::parse(&app.test_user.username).unwrap();
+    let new_password = UserPassword::parse(new_password_str.to_string(), &app.hibp_url)
+        .await
+        .unwrap();
+
+    let credentials = Credentials {
+        username: original_username,
+        password: new_password,
+    };
+
+    let validated_id = validate_credentials(credentials, &app.db_pool)
+        .await
+        .expect("Failed to validate user credentials with original username and new password!");
+
+    assert_eq!(validated_id, app.test_user.user_id);
+}
+
+/// Scenario B/C Boundary: Quarantined user hitting update endpoint gets 429
+#[tokio::test]
+async fn quarantined_client_is_blocked_from_profile_update() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // 1. Force client into quarantine by repeatedly hitting /auth with bad passwords
+    let bad_user = app.test_user.clone_with_bad_password();
+    for _ in 0..4 {
+        let _ = bad_user.login(&app).await;
+    }
+
+    let update_payload = serde_json::json!({
+        "username": "quarantined-attempt"
+    });
+
+    // Act
+    let response = app.put_user_profile(&update_payload).await;
+
+    // Assert
+    assert_eq!(
+        response.status().as_u16(),
+        429,
+        "Expected 429 Too Many Requests for quarantined user attempting update, got different code. Response: {:?}",
+        response.text().await
+    );
+}
+
 //delete
-//patch

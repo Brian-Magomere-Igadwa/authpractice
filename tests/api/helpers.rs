@@ -64,6 +64,18 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn put_user_profile<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .put(&format!("{}{}", &self.address, USERS))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_login<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,
@@ -79,6 +91,23 @@ impl TestApp {
     pub async fn health_check(&self) -> reqwest::Response {
         self.api_client
             .get(&format!("{}{}", &self.address, HEALTH_CHECK))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn put_user_profile_with_raw_cookie<Body>(
+        &self,
+        body: &Body,
+        raw_cookie: &str,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .put(&format!("{}{}", &self.address, USERS))
+            .header("Cookie", raw_cookie)
+            .json(body)
             .send()
             .await
             .expect("Failed to execute request.")
@@ -222,7 +251,7 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
 }
 
 pub struct TestUser {
-    user_id: Uuid,
+    pub user_id: Uuid,
     pub username: String,
     pub password: String,
 }
