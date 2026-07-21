@@ -1,7 +1,9 @@
 use std::net::TcpListener;
 
 use actix_session::{SessionMiddleware, storage::RedisSessionStore};
-use actix_web::{App, HttpResponse, HttpServer, Responder, cookie::Key, dev::Server, web};
+use actix_web::{
+    App, HttpResponse, HttpServer, Responder, cookie::Key, dev::Server, middleware::from_fn, web,
+};
 
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use secrecy::ExposeSecret;
@@ -10,8 +12,9 @@ use tracing_actix_web::TracingLogger;
 
 use crate::{
     configuration::{DatabaseSettings, Settings},
+    domain::reject_anonymous_users,
     end_points::{AUTH, HEALTH_CHECK, METRICS, USERS},
-    routes::{create_user_account, health_check, login},
+    routes::{create_user_account, health_check, login, update_user_profile},
 };
 
 pub struct Application {
@@ -123,6 +126,14 @@ async fn run(
             .route(USERS, web::post().to(create_user_account))
             .route(AUTH, web::post().to(login))
             .route(METRICS, web::get().to(metrics_endpoint))
+            // 2. PROTECTED / AUTH-ONLY ROUTES
+            .service(
+                web::scope("") // Or web::scope("") if you don't want a path prefix
+                    .wrap(from_fn(reject_anonymous_users)) // Block unauthenticated requests
+                    .route(USERS, web::put().to(update_user_profile)),
+                //todo!()
+                // .route(USERS, web::delete().to(delete_account)),
+            )
             // Register the connection as part of the application state
             // Get a pointer copy and attach it to the application state
             .app_data(connection.clone())

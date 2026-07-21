@@ -32,7 +32,7 @@ impl LoginTracker {
     }
 
     /// Fetches the tracker state for a given username from Redis.
-    async fn fetch(
+    pub async fn fetch(
         con: &mut MultiplexedConnection,
         namespace: &str,
         username: &str,
@@ -50,7 +50,7 @@ impl LoginTracker {
     }
 
     /// Checks if the user is currently quarantined. Resets the tracker if the quarantine expired.
-    fn check_quarantine(&mut self) -> Result<(), LoginError> {
+    pub fn check_quarantine(&mut self) -> Result<(), LoginError> {
         if self.is_quarantined
             && let Some(until) = self.quarantined_until
         {
