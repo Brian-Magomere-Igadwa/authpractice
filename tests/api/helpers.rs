@@ -37,6 +37,7 @@ pub struct TestApp {
     pub test_user: TestUser,
     pub redis_uri: String,
     pub redis_namespace: String,
+    pub hibp_url: String,
 }
 
 /// Determines the network routing target for the Have I Been Pwned (HIBP) API.
@@ -217,6 +218,7 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         test_user: TestUser::generate(),
         redis_uri: configuration.redis_uri.expose_secret().clone(),
         redis_namespace: test_isolation_id,
+        hibp_url: configuration.application.hibp_api_url,
     };
     test_app.test_user.store(&test_app.db_pool).await;
 
