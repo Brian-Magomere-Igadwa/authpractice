@@ -30,6 +30,7 @@ async fn get_stored_credentials(
         SELECT user_id, password_hash
         FROM users
         WHERE user_name = $1
+        FOR SHARE
         "#,
         username,
     )
