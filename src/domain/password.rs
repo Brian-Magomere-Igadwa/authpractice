@@ -30,6 +30,7 @@ async fn get_stored_credentials(
         SELECT user_id, password_hash
         FROM users
         WHERE user_name = $1
+        FOR SHARE
         "#,
         username,
     )
@@ -210,7 +211,7 @@ fn verify_password_hash(
         .map_err(AuthError::InvalidCredentials)
 }
 
-fn compute_password_hash(password: Secret<String>) -> Result<Secret<String>, anyhow::Error> {
+pub fn compute_password_hash(password: Secret<String>) -> Result<Secret<String>, anyhow::Error> {
     let salt = SaltString::generate(&mut rand::thread_rng());
     let password_hash = Argon2::new(
         Algorithm::Argon2id,

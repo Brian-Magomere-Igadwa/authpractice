@@ -37,6 +37,7 @@ pub struct TestApp {
     pub test_user: TestUser,
     pub redis_uri: String,
     pub redis_namespace: String,
+    pub hibp_url: String,
 }
 
 /// Determines the network routing target for the Have I Been Pwned (HIBP) API.
@@ -64,6 +65,18 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn put_user_profile<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .put(&format!("{}{}", &self.address, USERS))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_login<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,
@@ -79,6 +92,23 @@ impl TestApp {
     pub async fn health_check(&self) -> reqwest::Response {
         self.api_client
             .get(&format!("{}{}", &self.address, HEALTH_CHECK))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn put_user_profile_with_raw_cookie<Body>(
+        &self,
+        body: &Body,
+        raw_cookie: &str,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .put(&format!("{}{}", &self.address, USERS))
+            .header("Cookie", raw_cookie)
+            .json(body)
             .send()
             .await
             .expect("Failed to execute request.")
@@ -188,6 +218,7 @@ pub async fn spawn_app(hibp_target: HibpTarget) -> TestApp {
         test_user: TestUser::generate(),
         redis_uri: configuration.redis_uri.expose_secret().clone(),
         redis_namespace: test_isolation_id,
+        hibp_url: configuration.application.hibp_api_url,
     };
     test_app.test_user.store(&test_app.db_pool).await;
 
@@ -222,7 +253,7 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
 }
 
 pub struct TestUser {
-    user_id: Uuid,
+    pub user_id: Uuid,
     pub username: String,
     pub password: String,
 }

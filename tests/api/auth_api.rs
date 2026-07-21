@@ -1,5 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
+use authpractice::domain::{Credentials, UserName, UserPassword, validate_credentials};
 use fake::{Fake, Faker};
 
 use wiremock::{
@@ -468,10 +469,14 @@ async fn user_in_quarantine_continually_gets_429() {
         let _ = bad_user.login(&app).await;
     }
 
-    // Assert: Attempt to login again immediately while under quarantine
     let subsequent_response = bad_user.login(&app).await;
 
+    // Assert: Attempt to login again immediately while under quarantine
+    // theoratically a valid login user attempt should get 429
+    // let good_login_after_bad_attempts = app.test_user.login(&app).await;
+
     assert_eq!(
+        // good_login_after_bad_attempts.status().as_u16(),
         subsequent_response.status().as_u16(),
         429,
         "The user was allowed to attempt login again during their quarantine window."
@@ -526,6 +531,7 @@ async fn login_creates_exactly_one_session_and_no_duplicates() {
 
     // Query keys scoped to this namespace instance context
     let pattern = format!("{}:*", app.redis_namespace);
+
     let keys: Vec<String> = redis::cmd("KEYS")
         .arg(&pattern)
         .query_async(&mut con)
@@ -533,7 +539,7 @@ async fn login_creates_exactly_one_session_and_no_duplicates() {
         .unwrap();
 
     // Filter to isolate ONLY your namespaced actix-session keys
-    let tracker_prefix = format!("{}:login_attempts:", app.redis_namespace);
+    let tracker_prefix = format!("{}:session:", app.redis_namespace);
     let session_keys: Vec<&String> = keys
         .iter()
         .filter(|key| !key.starts_with(&tracker_prefix))
@@ -641,5 +647,361 @@ async fn login_latency_doesnt_drop_past_threshold_and_targets_under_load_with_k6
         stderr
     );
 }
+
+///patch
+#[tokio::test]
+async fn updating_profile_with_session_does_indeed_update_the_user_in_db() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // 1. Log in existing user
+    let login_res = app.test_user.login(&app).await;
+    assert_eq!(
+        login_res.status().as_u16(),
+        200,
+        "Setup failed: Could not log in test user before attempting profile update."
+    );
+
+    let new_username_str = "brand-new-updated-username";
+    let new_password_str = "Updated-Secure-Pass-123!#";
+
+    let update_payload = serde_json::json!({
+        "name": new_username_str,
+        "password": new_password_str
+    });
+
+    // Act
+    // 2. Call PUT /user with active session
+    let update_response = app.put_user_profile(&update_payload).await;
+
+    assert_eq!(
+        update_response.status().as_u16(),
+        200,
+        "The API failed to update the user profile. Response body: {:?}",
+        update_response.text().await
+    );
+
+    // Assert
+    // 3. Re-parse domain types for the new credentials
+    let new_username = UserName::parse(new_username_str).unwrap_or_else(|e| {
+        panic!("Failed to parse test username into UserName domain type. Details: {e}")
+    });
+
+    let new_password = UserPassword::parse(new_password_str.to_string(), &app.hibp_url)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("Failed to parse test password into UserPassword domain type. Details: {e}")
+        });
+
+    let credentials = Credentials {
+        username: new_username,
+        password: new_password,
+    };
+
+    // 4. Reuse validate_credentials directly against the DB pool!
+    let validated_user_id = validate_credentials(credentials, &app.db_pool)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to validate updated credentials against Postgres!{}",
+                e
+            )
+        });
+
+    // 5. Confirm the returned user_id matches our original user
+    assert_eq!(
+        validated_user_id, app.test_user.user_id,
+        "The validated user ID does not match the updated user!"
+    );
+}
+
+#[tokio::test]
+async fn updating_profile_without_session_yield_rejection() {
+    // Arrange
+    let name = "brand-new-updated-username";
+    let pass = "Updated-Secure-Pass-123!#";
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+    let new_user_profile_body = serde_json::json!({
+        "name": name,
+        "password": pass
+    });
+
+    // Act
+    //deliberately missing login step guaranteeing no session
+    let response = app.put_user_profile(&new_user_profile_body).await;
+    let status_code = response.status().as_u16();
+
+    // Assert
+    assert_eq!(
+        status_code,
+        401,
+        "Expected 401 for attempts to update profile without an existing session but got a different status code. Response body: {:?}",
+        response.text().await
+    );
+}
+
+/// Scenario C: Fake / Spoofed Session Token leads to rejection and quarantine
+#[tokio::test]
+async fn updating_profile_with_invalid_or_fake_token_returns_rejection() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let update_payload = serde_json::json!({
+        "name": "spoofed-user-attempt",
+        "password": "Some-New-Password-123!"
+    });
+
+    // Act - Send request with a completely fabricated session cookie
+    let response = app
+        .put_user_profile_with_raw_cookie(&update_payload, "actix-session=fake_invalid_token_12345")
+        .await;
+
+    // Assert - Should return 401/403
+    assert_eq!(
+        response.status().as_u16(),
+        401, // or 403 depending on your middleware setup
+        "Expected 401/403 for forged session token, but got a different status. Response body: {:?}",
+        response.text().await
+    );
+}
+
+/// Partial Update: Updating ONLY the username preserves the existing password
+#[tokio::test]
+async fn partial_update_username_only_preserves_existing_password() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // Log in
+    let login_res = app.test_user.login(&app).await;
+    assert_eq!(
+        login_res.status().as_u16(),
+        200,
+        "Setup failed: login failed."
+    );
+
+    let new_username_str = "new-only-username-change";
+    let update_payload = serde_json::json!({
+        "name": new_username_str
+        // Password deliberately omitted
+    });
+
+    // Act
+    let update_response = app.put_user_profile(&update_payload).await;
+    assert_eq!(
+        update_response.status().as_u16(),
+        200,
+        "Partial profile update failed. Details: {:?}",
+        update_response.text().await
+    );
+
+    // Assert - Validate that original password STILL works with the NEW username
+    let new_username = UserName::parse(new_username_str).unwrap();
+    let original_password = UserPassword::parse(app.test_user.password.clone(), &app.hibp_url)
+        .await
+        .unwrap_or_else(|e| panic!("{}", e));
+
+    let credentials = Credentials {
+        username: new_username,
+        password: original_password,
+    };
+
+    let validated_id = validate_credentials(credentials, &app.db_pool)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to validate user credentials with new username and original password!{}",
+                e
+            )
+        });
+
+    assert_eq!(validated_id, app.test_user.user_id);
+}
+
+/// Partial Update: Updating ONLY the password preserves the existing username
+#[tokio::test]
+async fn partial_update_password_only_preserves_existing_username() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let login_res = app.test_user.login(&app).await;
+    assert_eq!(
+        login_res.status().as_u16(),
+        200,
+        "Setup failed: login failed."
+    );
+
+    let new_password_str = "Brand-New-Password-Only-456!";
+    let update_payload = serde_json::json!({
+        "password": new_password_str
+        // Username deliberately omitted
+    });
+
+    // Act
+    let update_response = app.put_user_profile(&update_payload).await;
+    assert_eq!(
+        update_response.status().as_u16(),
+        200,
+        "Partial profile update (password only) failed. Details: {:?}",
+        update_response.text().await
+    );
+
+    // Assert - Validate original username works with NEW password
+    let original_username = UserName::parse(&app.test_user.username).unwrap();
+    let new_password = UserPassword::parse(new_password_str.to_string(), &app.hibp_url)
+        .await
+        .unwrap_or_else(|e| panic!("Issues with parsing password provided {}", e));
+
+    let credentials = Credentials {
+        username: original_username,
+        password: new_password,
+    };
+
+    let validated_id = validate_credentials(credentials, &app.db_pool)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to validate user credentials with original username and new password!{}",
+                e
+            )
+        });
+
+    assert_eq!(validated_id, app.test_user.user_id);
+}
+
+/// Scenario B/C Boundary: Quarantined user hitting update endpoint gets 429
+#[tokio::test]
+async fn quarantined_client_is_blocked_from_profile_update() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // good login attempt so that session is in place
+    let valid_login = app.test_user.login(&app).await;
+    assert_eq!(
+        valid_login.status().as_u16(),
+        200,
+        "Setup failed: Valid login before quarantine failed. {:?}",
+        valid_login.text().await
+    );
+
+    // 1. Force client into quarantine by repeatedly hitting /auth with bad passwords
+    let bad_user = app.test_user.clone_with_bad_password();
+    for _ in 0..4 {
+        let _ = bad_user.login(&app).await;
+    }
+
+    let update_payload = serde_json::json!({
+        "name": "quarantined-attempt"
+    });
+
+    // Act
+    // todo!() so because of quarantine state the user shouldnt be able to update profile
+    //issues like the possibility of a valid user being blocked from access because of repeated blocks by attackers
+    // that make them unfairly be in quarantine can perhaps be solved at deployment phase via ip based rate limiting
+    // we'll see
+    let response = app.put_user_profile(&update_payload).await;
+
+    // Assert
+    assert_eq!(
+        response.status().as_u16(),
+        429,
+        "Expected 429 Too Many Requests for quarantined user attempting update, got different code. Response: {:?}",
+        response.text().await
+    );
+}
+
+// / Edge Case: Simultaneous Password Update & Login Attempt
+// / Ensures that if a user updates their password while a login request using OLD credentials
+// / is in-flight, the old login attempt MUST be rejected or invalidated so old credentials
+// / cannot grant access.
+
+#[tokio::test]
+async fn update_profile_latency_doesnt_drop_past_threshold_and_targets_under_load_with_k6() {
+    // Housekeeping
+    // Skip performance testing under coverage tracking due to instrumentation overhead
+    if std::env::var("TARPAULIN").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
+        return;
+    }
+    // Skip entirely if running inside GitHub Actions
+    if std::env::var("CI").is_ok() {
+        return;
+    }
+
+    // Arrange
+    // Use the mock HIBP target to avoid hammering the live HIBP API during load tests
+    let app = spawn_app(HibpTarget::Mock).await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path_regex(r"^/range/[0-9A-FA-f]{5}$"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_string("0018A45135D29:0")
+                .set_delay(std::time::Duration::from_millis(250)),
+        )
+        .mount(&app.hibp_server)
+        .await;
+
+    // Compile TypeScript files locally so Docker can read the compiled JS bundle
+    let pnpm_bundle = tokio::process::Command::new("pnpm")
+        .current_dir("./load_tests")
+        .args(["run", "bundle"])
+        .output()
+        .await
+        .map_err(|err| format!("Failed to execute TypeScript compiler bundle sequence: {err}"))
+        .unwrap();
+
+    assert!(
+        pnpm_bundle.status.success(),
+        "TypeScript compilation failed!\n\nSTDOUT:\n{}\n\nSTDERR:\n{}",
+        String::from_utf8_lossy(&pnpm_bundle.stdout),
+        String::from_utf8_lossy(&pnpm_bundle.stderr)
+    );
+
+    // Map 'localhost' to the special Docker host routing address
+    let docker_target_address = get_docker_accessible_url(app.current_port);
+
+    let project_root =
+        std::env::current_dir().expect("Failed to determine current workspace directory");
+    let dist_volume_mount = format!("{}/load_tests/dist:/apps/dist", project_root.display());
+    let summary_volume_mount = format!(
+        "{}/load_tests/benchmarks:/apps/benchmarks",
+        project_root.display()
+    );
+
+    // Act: Trigger the official k6 Docker container
+    let k6_run = tokio::process::Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "--add-host",
+            "host.docker.internal:host-gateway",
+            "-v",
+            &dist_volume_mount,
+            "-v",
+            &summary_volume_mount,
+            "-e",
+            &format!("K6_ENV_BASE_URL={}", docker_target_address),
+            "-e",
+            &format!("TARGET_USER_NAME={}", app.test_user.username),
+            "-e",
+            &format!("TARGET_USER_PASSWORD={}", app.test_user.password),
+            "grafana/k6:latest",
+            "run",
+            "/apps/dist/update_profile_stress.js",
+        ])
+        .output()
+        .await
+        .map_err(|err| format!("Failed to execute Docker k6 container: {err}"))
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&k6_run.stdout);
+    let stderr = String::from_utf8_lossy(&k6_run.stderr);
+
+    // Assert: Trap performance regressions or structural threshold failures
+    assert!(
+        k6_run.status.success(),
+        "UPDATE PROFILE PERFORMANCE REGRESSION TRAPPED BY DOCKER K6 CONTAINER!\n\nSTDOUT:\n{}\nSTDERR:\n{}",
+        stdout,
+        stderr
+    );
+}
+
 //delete
-//patch

@@ -32,7 +32,7 @@ impl LoginTracker {
     }
 
     /// Fetches the tracker state for a given username from Redis.
-    async fn fetch(
+    pub async fn fetch(
         con: &mut MultiplexedConnection,
         namespace: &str,
         username: &str,
@@ -50,7 +50,7 @@ impl LoginTracker {
     }
 
     /// Checks if the user is currently quarantined. Resets the tracker if the quarantine expired.
-    fn check_quarantine(&mut self) -> Result<(), LoginError> {
+    pub fn check_quarantine(&mut self) -> Result<(), LoginError> {
         if self.is_quarantined
             && let Some(until) = self.quarantined_until
         {
@@ -146,6 +146,33 @@ pub async fn login(
             session
                 .insert_user_id(user_id)
                 .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+            // Generate a fresh unique session ID for Redis tracking
+            let new_session_id = uuid::Uuid::new_v4().to_string();
+            session
+                .insert_session_id(new_session_id)
+                .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+            // Strategy A Guard: Track active session token under user's Redis tracking set
+            if let Ok(Some(session_id)) = session.get_session_id() {
+                let user_session_key = if namespace.is_empty() {
+                    format!("user_sessions:{}", user_id)
+                } else {
+                    format!("{}:user_sessions:{}", namespace, user_id)
+                };
+
+                let session_ttl = settings.application.session_ttl_seconds;
+
+                let _: () = con
+                    .sadd(&user_session_key, &session_id)
+                    .await
+                    .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+                let _: () = con
+                    .expire(&user_session_key, session_ttl)
+                    .await
+                    .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+            }
 
             Ok(HttpResponse::Ok().finish())
         }
