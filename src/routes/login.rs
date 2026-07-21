@@ -147,6 +147,33 @@ pub async fn login(
                 .insert_user_id(user_id)
                 .map_err(|e| LoginError::UnexpectedError(e.into()))?;
 
+            // Generate a fresh unique session ID for Redis tracking
+            let new_session_id = uuid::Uuid::new_v4().to_string();
+            session
+                .insert_session_id(new_session_id)
+                .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+            // Strategy A Guard: Track active session token under user's Redis tracking set
+            if let Ok(Some(session_id)) = session.get_session_id() {
+                let user_session_key = if namespace.is_empty() {
+                    format!("user_sessions:{}", user_id)
+                } else {
+                    format!("{}:user_sessions:{}", namespace, user_id)
+                };
+
+                let session_ttl = settings.application.session_ttl_seconds;
+
+                let _: () = con
+                    .sadd(&user_session_key, &session_id)
+                    .await
+                    .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+
+                let _: () = con
+                    .expire(&user_session_key, session_ttl as i64)
+                    .await
+                    .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+            }
+
             Ok(HttpResponse::Ok().finish())
         }
         Err(auth_err) => {
