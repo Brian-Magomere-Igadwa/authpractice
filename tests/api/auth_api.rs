@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use authpractice::domain::{Credentials, UserName, UserPassword, validate_credentials};
 use fake::{Fake, Faker};
@@ -909,9 +909,9 @@ async fn quarantined_client_is_blocked_from_profile_update() {
     );
 }
 
-/// Edge Case: Simultaneous Password Update & Login Attempt
-/// Ensures that if a user updates their password while a login request using OLD credentials
-/// is in-flight, the old login attempt MUST be rejected or invalidated so old credentials
-/// cannot grant access.
+// / Edge Case: Simultaneous Password Update & Login Attempt
+// / Ensures that if a user updates their password while a login request using OLD credentials
+// / is in-flight, the old login attempt MUST be rejected or invalidated so old credentials
+// / cannot grant access.
 
 //delete
