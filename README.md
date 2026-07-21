@@ -23,50 +23,77 @@ To understand the internal lifecycles, defensive guardrails, and API transitions
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User
+    actor User A as Client / Attacker
+    actor User B as Legitimate User
     participant API as Rust Backend
     participant PG as Postgres (SQLx)
     participant RD as Redis
 
-    Note over User, RD: Scenario A: Signup Path with Edge Cases
-    User->>API: POST /signup (Form Data)
+    Note over User A, RD: Scenario A: Signup Path with Edge Cases
+    User A->>API: POST /signup (Form Data)
     API->>PG: Check if user exists
     alt User Already Exists
         PG-->>API: Conflict (User found)
-        API-->>User: 409 Conflict / Redirect to Login Screen
+        API-->>User A: 409 Conflict / Redirect to Login Screen
     else Validation Fails
-        API-->>User: 400 Bad Request (Try Again)
+        API-->>User A: 400 Bad Request (Try Again)
     else Success
         API->>PG: Save User (Name, Password)
         PG-->>API: 201 Created
-        API-->>User: 201 Created / Route to Login Screen
+        API-->>User A: 201 Created / Route to Login Screen
     end
 
-    Note over User, RD: Scenario B: Login & Brute Force Protection
-    User->>API: POST /login (Credentials)
+    Note over User A, RD: Scenario B: Login & Brute Force Protection
+    User A->>API: POST /auth (Credentials)
     API->>RD: Check rate limit / failure count
     alt Too Many Attempts
         RD-->>API: Limit Exceeded
-        API-->>User: 429 Too Many Requests (Lockout)
+        API-->>User A: 429 Too Many Requests (Lockout)
     else Under Limit
         API->>PG: Verify Passwords
         alt Wrong Password
             API->>RD: Increment Failure Count
-            API-->>User: 401 Unauthorized (Retry Login)
+            API-->>User A: 401 Unauthorized (Retry Login)
         else Correct Password
-            API->>RD: Write Session Token (Set TTL)
+            API->>RD: Write Session Token & Register in User Tracking Set
             RD-->>API: Success
-            API-->>User: 200 OK + Session Cookie/Token
+            API-->>User A: 200 OK + Session Cookie
         end
     end
 
-    Note over User, RD: Scenario C: Token Abuse / Spoofing
-    User->>API: PUT /user (With fake token)
+    Note over User A, RD: Scenario C: Token Abuse / Spoofing
+    User A->>API: PUT /user (With fake token)
     API->>RD: Validate token against session list
     RD-->>API: Token Not Found / Invalid
     API->>RD: Block IP/Account (Quarantine)
-    API-->>User: 403 Forbidden / Forced Logout
+    API-->>User A: 403 Forbidden / Forced Logout
 
+    Note over User B, RD: Scenario D: Concurrent Login vs. Password Update (Race Condition Handling)
+    par Thread 1: Password Update (PUT /user)
+        User B->>API: PUT /user (New Password)
+        API->>PG: BEGIN TX - SELECT ... FOR UPDATE (Acquire Row Lock)
+        PG-->>API: Row Locked
+    and Thread 2: Simultaneous Login (POST /auth)
+        User B->>API: POST /auth (Old Credentials)
+        API->>PG: Attempt Credential Check
+        Note over API, PG: Blocks at Postgres level waiting for FOR UPDATE lock release
+    end
+
+    API->>PG: UPDATE users SET password_hash = ...
+    API->>PG: COMMIT TX (Releases Row Lock)
+    
+    API->>RD: SMEMBERS user_sessions:{user_id}
+    RD-->>API: Returns Active Session IDs
+    API->>RD: DEL session:{id_1}, session:{id_2} & user_sessions:{user_id}
+    API-->>User B: 200 Profile Updated
+
+    Note over API, PG: Thread 2 resumes post-commit
+    PG-->>API: Returns Updated User Record
+    API->>API: Verify Password against NEW Hash
+    alt Old Password Provided
+        API->>RD: Record Failed Attempt
+        API-->>User B: 401 Unauthorized (Password changed in-flight)
+    end
 ```
 
 ---
