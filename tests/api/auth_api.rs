@@ -874,4 +874,81 @@ async fn quarantined_client_is_blocked_from_profile_update() {
     );
 }
 
+/// Edge Case: Simultaneous Password Update & Login Attempt
+/// Ensures that if a user updates their password while a login request using OLD credentials
+/// is in-flight, the old login attempt MUST be rejected or invalidated so old credentials
+/// cannot grant access.
+#[tokio::test]
+async fn simultaneous_update_and_login_with_old_credentials_prevents_unauthorized_session() {
+    // Arrange
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    let original_username = app.test_user.username.clone();
+    let original_password = app.test_user.password.clone();
+    let new_password_str = "Brand-New-Secure-Pass-123!#";
+
+    // Prepare payloads
+    let login_payload_old_creds = serde_json::json!({
+        "name": &original_username,
+        "password": &original_password
+    });
+
+    let update_payload_new_password = serde_json::json!({
+        "password": new_password_str
+    });
+
+    // 1. Establish an active session first so the user can execute PUT /user
+    let initial_login_res = app.test_user.login(&app).await;
+    assert_eq!(
+        initial_login_res.status().as_u16(),
+        200,
+        "Setup failed: Could not log in on part 1."
+    );
+
+    // Act
+    // 2. Fire BOTH requests simultaneously using tokio::join!
+    //    We construct separate HTTP clients or calls so they run on parallel threads.
+    let update_future = app.put_user_profile(&update_payload_new_password);
+    let login_with_old_creds_future = app.post_login(&login_payload_old_creds);
+
+    let (update_res, old_login_res) = tokio::join!(update_future, login_with_old_creds_future);
+
+    // Assert
+    // The profile update must succeed
+    assert_eq!(
+        update_res.status().as_u16(),
+        200,
+        "Profile update failed during concurrent execution. Body: {:?}",
+        update_res.text().await
+    );
+
+    // The login using OLD credentials MUST either:
+    // a) Return 401 directly because credential check ran after password changed, OR
+    // b) If it succeeded momentarily, the resulting session token must be invalid/purged.
+    if old_login_res.status().as_u16() == 200 {
+        // If login returned 200 due to thread timing, verify that using the newly issued
+        // session token fails on subsequent authenticated requests because Redis sessions
+        // were invalidated upon password change.
+        let old_login_cookies = old_login_res.headers().get("set-cookie");
+        if let Some(cookie_hdr) = old_login_cookies {
+            let cookie_str = cookie_hdr.to_str().unwrap();
+            let check_response = app
+                .put_user_profile_with_raw_cookie(&update_payload_new_password, cookie_str)
+                .await;
+
+            assert!(
+                check_response.status().as_u16() == 401 || check_response.status().as_u16() == 403,
+                "The login request issued a valid session cookie with old credentials! Re-check session revocation logic."
+            );
+        }
+    } else {
+        // Ideal behavior: The login request was rejected with 401
+        assert_eq!(
+            old_login_res.status().as_u16(),
+            401,
+            "Expected 401 Unauthorized for login attempt with old credentials during update."
+        );
+    }
+}
+
 //delete
