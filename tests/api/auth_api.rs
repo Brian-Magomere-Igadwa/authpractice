@@ -664,7 +664,7 @@ async fn updating_profile_with_session_does_indeed_update_the_user_in_db() {
     let new_password_str = "Updated-Secure-Pass-123!#";
 
     let update_payload = serde_json::json!({
-        "username": new_username_str,
+        "name": new_username_str,
         "password": new_password_str
     });
 
@@ -735,7 +735,7 @@ async fn updating_profile_with_invalid_or_fake_token_returns_rejection() {
     let app = spawn_app(HibpTarget::LiveProduction).await;
 
     let update_payload = serde_json::json!({
-        "username": "spoofed-user-attempt",
+        "name": "spoofed-user-attempt",
         "password": "Some-New-Password-123!"
     });
 
@@ -769,7 +769,7 @@ async fn partial_update_username_only_preserves_existing_password() {
 
     let new_username_str = "new-only-username-change";
     let update_payload = serde_json::json!({
-        "username": new_username_str
+        "name": new_username_str
         // Password deliberately omitted
     });
 
@@ -859,7 +859,7 @@ async fn quarantined_client_is_blocked_from_profile_update() {
     }
 
     let update_payload = serde_json::json!({
-        "username": "quarantined-attempt"
+        "name": "quarantined-attempt"
     });
 
     // Act
