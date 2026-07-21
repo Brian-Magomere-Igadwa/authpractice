@@ -101,14 +101,14 @@ This project strictly adheres to **Test-Driven Development (TDD)** utilizing the
 ### Phase 2: Core Authentication Modules
 
 - [x] Implement secure User Sign-Up flow accompanied by strict validation unit tests.
-- [ ] Implement User Login flow with companion session verification unit tests.
+- [x] Implement User Login flow with companion session verification unit tests.
 - [ ] Implement Profile Update (`PUT /user`) capabilities with isolated unit tests.
 - [ ] Implement Account **_Soft_** Deletion (`DELETE /user`) routines with companion unit tests.
 
 ### Phase 2(b): Storage & Dockerization
 
-- [ ] Write comprehensive integration tests for the database layer to definitively verify that storage, updates, and soft deletion behave as expected under real transactions.
-- [ ] Fully containerize the application environment and decouple database dependencies via Docker containers.
+- [x] Write comprehensive integration tests for the database layer to definitively verify that storage, updates, and soft deletion behave as expected under real transactions.
+- [x] Fully containerize the application environment and decouple database dependencies via Docker containers.
 - [ ] Persist structural user fields securely within a PostgreSQL relational schema.
 
 ### Phase 3: High-Load Stress Testing & Optimization
