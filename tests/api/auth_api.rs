@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use authpractice::domain::{Credentials, UserName, UserPassword, validate_credentials};
 use fake::{Fake, Faker};
@@ -9,9 +9,6 @@ use wiremock::{
 };
 
 use crate::helpers::{HibpTarget, get_docker_accessible_url, spawn_app};
-
-use crate::authentication::validate_credentials;
-use crate::domain::{Credentials, UserName, UserPassword};
 
 #[tokio::test]
 async fn mis_shaped_auth_requests_are_rejected() {
@@ -472,10 +469,14 @@ async fn user_in_quarantine_continually_gets_429() {
         let _ = bad_user.login(&app).await;
     }
 
-    // Assert: Attempt to login again immediately while under quarantine
     let subsequent_response = bad_user.login(&app).await;
 
+    // Assert: Attempt to login again immediately while under quarantine
+    // theoratically a valid login user attempt should get 429
+    // let good_login_after_bad_attempts = app.test_user.login(&app).await;
+
     assert_eq!(
+        // good_login_after_bad_attempts.status().as_u16(),
         subsequent_response.status().as_u16(),
         429,
         "The user was allowed to attempt login again during their quarantine window."
@@ -530,6 +531,7 @@ async fn login_creates_exactly_one_session_and_no_duplicates() {
 
     // Query keys scoped to this namespace instance context
     let pattern = format!("{}:*", app.redis_namespace);
+
     let keys: Vec<String> = redis::cmd("KEYS")
         .arg(&pattern)
         .query_async(&mut con)
@@ -537,7 +539,7 @@ async fn login_creates_exactly_one_session_and_no_duplicates() {
         .unwrap();
 
     // Filter to isolate ONLY your namespaced actix-session keys
-    let tracker_prefix = format!("{}:login_attempts:", app.redis_namespace);
+    let tracker_prefix = format!("{}:session:", app.redis_namespace);
     let session_keys: Vec<&String> = keys
         .iter()
         .filter(|key| !key.starts_with(&tracker_prefix))
@@ -681,12 +683,15 @@ async fn updating_profile_with_session_does_indeed_update_the_user_in_db() {
 
     // Assert
     // 3. Re-parse domain types for the new credentials
-    let new_username = UserName::parse(new_username_str)
-        .expect("Failed to parse test username into UserName domain type");
+    let new_username = UserName::parse(new_username_str).unwrap_or_else(|e| {
+        panic!("Failed to parse test username into UserName domain type. Details: {e}")
+    });
 
     let new_password = UserPassword::parse(new_password_str.to_string(), &app.hibp_url)
         .await
-        .expect("Failed to parse test password into UserPassword domain type");
+        .unwrap_or_else(|e| {
+            panic!("Failed to parse test password into UserPassword domain type. Details: {e}")
+        });
 
     let credentials = Credentials {
         username: new_username,
@@ -696,7 +701,12 @@ async fn updating_profile_with_session_does_indeed_update_the_user_in_db() {
     // 4. Reuse validate_credentials directly against the DB pool!
     let validated_user_id = validate_credentials(credentials, &app.db_pool)
         .await
-        .expect("Failed to validate updated credentials against Postgres!");
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to validate updated credentials against Postgres!{}",
+                e
+            )
+        });
 
     // 5. Confirm the returned user_id matches our original user
     assert_eq!(
@@ -708,6 +718,8 @@ async fn updating_profile_with_session_does_indeed_update_the_user_in_db() {
 #[tokio::test]
 async fn updating_profile_without_session_yield_rejection() {
     // Arrange
+    let name = "brand-new-updated-username";
+    let pass = "Updated-Secure-Pass-123!#";
     let app = spawn_app(HibpTarget::LiveProduction).await;
     let new_user_profile_body = serde_json::json!({
         "name": name,
@@ -716,14 +728,14 @@ async fn updating_profile_without_session_yield_rejection() {
 
     // Act
     //deliberately missing login step guaranteeing no session
-    let response = app.put_user(&new_user_profile_body).await;
+    let response = app.put_user_profile(&new_user_profile_body).await;
     let status_code = response.status().as_u16();
 
     // Assert
     assert_eq!(
         status_code,
-        403,
-        "Expected 403 for attempts to update profile without an existing session but got a different status code. Response body: {:?}",
+        401,
+        "Expected 401 for attempts to update profile without an existing session but got a different status code. Response body: {:?}",
         response.text().await
     );
 }
@@ -786,7 +798,7 @@ async fn partial_update_username_only_preserves_existing_password() {
     let new_username = UserName::parse(new_username_str).unwrap();
     let original_password = UserPassword::parse(app.test_user.password.clone(), &app.hibp_url)
         .await
-        .unwrap();
+        .unwrap_or_else(|e| panic!("{}", e));
 
     let credentials = Credentials {
         username: new_username,
@@ -795,7 +807,12 @@ async fn partial_update_username_only_preserves_existing_password() {
 
     let validated_id = validate_credentials(credentials, &app.db_pool)
         .await
-        .expect("Failed to validate user credentials with new username and original password!");
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to validate user credentials with new username and original password!{}",
+                e
+            )
+        });
 
     assert_eq!(validated_id, app.test_user.user_id);
 }
@@ -832,7 +849,7 @@ async fn partial_update_password_only_preserves_existing_username() {
     let original_username = UserName::parse(&app.test_user.username).unwrap();
     let new_password = UserPassword::parse(new_password_str.to_string(), &app.hibp_url)
         .await
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Issues with parsing password provided {}", e));
 
     let credentials = Credentials {
         username: original_username,
@@ -841,7 +858,12 @@ async fn partial_update_password_only_preserves_existing_username() {
 
     let validated_id = validate_credentials(credentials, &app.db_pool)
         .await
-        .expect("Failed to validate user credentials with original username and new password!");
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to validate user credentials with original username and new password!{}",
+                e
+            )
+        });
 
     assert_eq!(validated_id, app.test_user.user_id);
 }
@@ -851,6 +873,15 @@ async fn partial_update_password_only_preserves_existing_username() {
 async fn quarantined_client_is_blocked_from_profile_update() {
     // Arrange
     let app = spawn_app(HibpTarget::LiveProduction).await;
+
+    // good login attempt so that session is in place
+    let valid_login = app.test_user.login(&app).await;
+    assert_eq!(
+        valid_login.status().as_u16(),
+        200,
+        "Setup failed: Valid login before quarantine failed. {:?}",
+        valid_login.text().await
+    );
 
     // 1. Force client into quarantine by repeatedly hitting /auth with bad passwords
     let bad_user = app.test_user.clone_with_bad_password();
@@ -863,6 +894,10 @@ async fn quarantined_client_is_blocked_from_profile_update() {
     });
 
     // Act
+    // todo!() so because of quarantine state the user shouldnt be able to update profile
+    //issues like the possibility of a valid user being blocked from access because of repeated blocks by attackers
+    // that make them unfairly be in quarantine can perhaps be solved at deployment phase via ip based rate limiting
+    // we'll see
     let response = app.put_user_profile(&update_payload).await;
 
     // Assert
