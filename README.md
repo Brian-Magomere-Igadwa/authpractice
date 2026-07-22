@@ -128,18 +128,18 @@ This project strictly adheres to **Test-Driven Development (TDD)** utilizing the
 
 - [x] Implement secure User Sign-Up flow accompanied by strict validation unit tests.
 - [x] Implement User Login flow with companion session verification unit tests.
-- [ ] Implement Profile Update (`PUT /user`) capabilities with isolated unit tests.
-- [ ] Implement Account **_Soft_** Deletion (`DELETE /user`) routines with companion unit tests.
+- [x] Implement Profile Update (`PUT /user`) capabilities with isolated unit tests.
+- [x] Implement Account **_Soft_** Deletion (`DELETE /user`) routines with companion unit tests.
 
 ### Phase 2(b): Storage & Dockerization
 
 - [x] Write comprehensive integration tests for the database layer to definitively verify that storage, updates, and soft deletion behave as expected under real transactions.
 - [x] Fully containerize the application environment and decouple database dependencies via Docker containers.
-- [ ] Persist structural user fields securely within a PostgreSQL relational schema.
+- [x] Persist structural user fields securely within a PostgreSQL relational schema.
 
 ### Phase 3: High-Load Stress Testing & Optimization
 
-- [ ] **Conduct stress and load testing on authentication endpoints:** Simulate high-concurrency spikes on `/signup` and `/login` (including rapid consecutive requests from single sources). Identify performance bottlenecks, ensure the server maintains availability under heavy load, and implement optimizations or rate-limiting where necessary.
+- [x] **Conduct stress and load testing on authentication endpoints:** Simulate high-concurrency spikes on `/signup` and `/login` (including rapid consecutive requests from single sources). Identify performance bottlenecks, ensure the server maintains availability under heavy load, and implement optimizations or rate-limiting where necessary.
 
 ---
 
