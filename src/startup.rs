@@ -14,7 +14,7 @@ use crate::{
     configuration::{DatabaseSettings, Settings},
     domain::reject_anonymous_users,
     end_points::{AUTH, HEALTH_CHECK, METRICS, USERS},
-    routes::{create_user_account, health_check, login, update_user_profile},
+    routes::{create_user_account, delete_account, health_check, login, update_user_profile},
 };
 
 pub struct Application {
@@ -130,9 +130,8 @@ async fn run(
             .service(
                 web::scope("") // Or web::scope("") if you don't want a path prefix
                     .wrap(from_fn(reject_anonymous_users)) // Block unauthenticated requests
-                    .route(USERS, web::put().to(update_user_profile)),
-                //todo!()
-                // .route(USERS, web::delete().to(delete_account)),
+                    .route(USERS, web::put().to(update_user_profile))
+                    .route(USERS, web::delete().to(delete_account)),
             )
             // Register the connection as part of the application state
             // Get a pointer copy and attach it to the application state
