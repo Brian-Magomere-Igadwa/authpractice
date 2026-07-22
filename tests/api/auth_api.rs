@@ -1059,3 +1059,47 @@ async fn soft_delete_user_invalidates_session_and_flags_db_record() {
         "Soft-deleted user was still able to successfully log in!"
     );
 }
+
+#[tokio::test]
+async fn soft_deleted_user_is_blocked_from_protected_routes() {
+    // 1. Arrange: Spin up app and log in to obtain an active session
+    let app = spawn_app(HibpTarget::LiveProduction).await;
+    let login_body = serde_json::json!({
+        "name": &app.test_user.username,
+        "password": &app.test_user.password
+    });
+
+    let login_response = app.post_login(&login_body).await;
+    assert_eq!(
+        login_response.status().as_u16(),
+        200,
+        "Setup failed: Could not log in test user"
+    );
+
+    // 2. Act 1: Soft-delete the user directly in the database behind the scenes
+    // (Simulates account soft-deletion or suspension while an existing session cookie remains active)
+    // 2. Act: Call the DELETE /users (or DELETE /users/me) endpoint
+    let delete_response = app.delete_user_account().await;
+
+    // 3. Assert Response: Should return 200 OK (or 204 No Content depending on spec)
+    assert_eq!(
+        delete_response.status().as_u16(),
+        200,
+        "Expected 200 OK on user soft deletion, got {}",
+        delete_response.status()
+    );
+
+    // 3. Act 2: Attempt to update profile using the pre-existing active session
+    let update_payload = serde_json::json!({
+        "name": "quarantined-attempt"
+    });
+    let profile_response = app.put_user_profile(&update_payload).await;
+
+    // 4. Assert: Endpoint / middleware must reject with 401 Unauthorized
+    assert_eq!(
+        profile_response.status().as_u16(),
+        401,
+        "Soft-deleted user was able to access guarded routes with an active session! Expected 401 Unauthorized, got {}",
+        profile_response.status()
+    );
+}
