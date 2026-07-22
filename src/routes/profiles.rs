@@ -14,6 +14,7 @@ use crate::routes::{error_chain_fmt, login};
 use crate::startup::ApplicationBaseUrl;
 
 use crate::telemetry::spawn_blocking_with_tracing;
+use crate::utils::e500;
 
 #[derive(serde::Deserialize)]
 pub struct UpdateProfileData {
@@ -289,6 +290,36 @@ pub async fn revoke_user_sessions_in_redis(
 
     // 3. Delete the tracking set key itself
     let _: () = con.del(user_sessions_key).await.unwrap_or(());
+
+    Ok(())
+}
+
+/// deletion handler
+/// Makes the most sense placed here since it is basically an update since it really is a soft deletion which is a prop update for us.
+#[tracing::instrument(name = "Soft delete user account", skip(pool))]
+pub async fn delete_account(
+    user_id: web::ReqData<UserId>, // Cleanly extracts from req.extensions()
+    pool: web::Data<PgPool>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let user_id = user_id.into_inner();
+
+    soft_delete_user(&pool, *user_id).await.map_err(e500)?;
+
+    Ok(HttpResponse::Ok().finish())
+}
+
+#[tracing::instrument(name = "Set deleted_at timestamp in database", skip(pool))]
+pub async fn soft_delete_user(pool: &PgPool, user_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        UPDATE users
+        SET deleted_at = NOW()
+        WHERE user_id = $1 AND deleted_at IS NULL
+        "#,
+        user_id
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }
