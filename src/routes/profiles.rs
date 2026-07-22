@@ -11,9 +11,11 @@ use uuid::Uuid;
 use crate::configuration::Settings;
 use crate::domain::{UserId, UserName, UserPassword, compute_password_hash};
 use crate::routes::{error_chain_fmt, login};
+use crate::session_state::TypedSession;
 use crate::startup::ApplicationBaseUrl;
 
 use crate::telemetry::spawn_blocking_with_tracing;
+use crate::utils::e500;
 
 #[derive(serde::Deserialize)]
 pub struct UpdateProfileData {
@@ -289,6 +291,72 @@ pub async fn revoke_user_sessions_in_redis(
 
     // 3. Delete the tracking set key itself
     let _: () = con.del(user_sessions_key).await.unwrap_or(());
+
+    Ok(())
+}
+
+/// deletion handler
+/// Makes the most sense placed here since it is basically an update since it really is a soft deletion which is a prop update for us.
+#[tracing::instrument(
+    name = "Soft delete user account",
+    skip(pool, session, redis_client, settings)
+)]
+pub async fn delete_account(
+    user_id: web::ReqData<UserId>,
+    pool: web::Data<PgPool>,
+    session: TypedSession,
+    redis_client: web::Data<redis::Client>,
+    settings: web::Data<Settings>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let user_id = user_id.into_inner();
+
+    // 1. Mark account as soft-deleted in Postgres
+    soft_delete_user(&pool, *user_id).await.map_err(e500)?;
+
+    // 2. Clear Redis session tracking set for this user
+    let namespace = &settings.application.redis_namespace;
+    clear_user_redis_sessions(&redis_client, namespace, *user_id)
+        .await
+        .map_err(e500)?;
+
+    // 3. Purge the active HTTP session cookie & state
+    session.log_out();
+
+    Ok(HttpResponse::Ok().finish())
+}
+
+#[tracing::instrument(name = "Set deleted_at timestamp in database", skip(pool))]
+pub async fn soft_delete_user(pool: &PgPool, user_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        UPDATE users
+        SET deleted_at = NOW()
+        WHERE user_id = $1 AND deleted_at IS NULL
+        "#,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+#[tracing::instrument(name = "Clear Redis session keys for user", skip(redis_client))]
+pub async fn clear_user_redis_sessions(
+    redis_client: &redis::Client,
+    namespace: &str,
+    user_id: Uuid,
+) -> Result<(), anyhow::Error> {
+    let mut con = redis_client.get_multiplexed_async_connection().await?;
+
+    let user_session_key = if namespace.is_empty() {
+        format!("user_sessions:{}", user_id)
+    } else {
+        format!("{}:user_sessions:{}", namespace, user_id)
+    };
+
+    // Remove the tracking set stored during login
+    let _: () = con.del(&user_session_key).await?;
 
     Ok(())
 }

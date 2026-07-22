@@ -53,6 +53,14 @@ pub enum HibpTarget {
 }
 
 impl TestApp {
+    pub async fn delete_user_account(&self) -> reqwest::Response {
+        self.api_client
+            .delete(&format!("{}/users", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_signup<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,

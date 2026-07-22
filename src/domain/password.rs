@@ -29,7 +29,7 @@ async fn get_stored_credentials(
         r#"
         SELECT user_id, password_hash
         FROM users
-        WHERE user_name = $1
+        WHERE user_name = $1 AND deleted_at IS NULL
         FOR SHARE
         "#,
         username,
