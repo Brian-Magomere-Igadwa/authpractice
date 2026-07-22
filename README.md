@@ -91,10 +91,8 @@ sequenceDiagram
     Note over API, PG: Thread 2 resumes post-commit
     PG-->>API: Returns Updated User Record
     API->>API: Verify Password against NEW Hash
-    alt Old Password Provided
-        API->>RD: Record Failed Attempt
-        API-->>User B: 401 Unauthorized (Password changed in-flight)
-    end
+    API->>RD: Record Failed Attempt
+    API-->>User B: 401 Unauthorized (Password changed in-flight)
 ```
 
 ---
